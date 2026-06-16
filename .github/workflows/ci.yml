@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+          MYSQL_DATABASE: AI_Socialmedia_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    env:
+      DATABASE_URL: mysql://root@127.0.0.1:3306/AI_Socialmedia_test
+      REDIS_URL: redis://127.0.0.1:6379
+      JWT_SECRET: ci-test-jwt-secret-min-32-characters-long
+      ENCRYPTION_KEY: ci-encryption-key-32-chars-min!!
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ai-social-platform-backend/package-lock.json
+      - name: Install backend deps
+        working-directory: ai-social-platform-backend
+        run: npm ci
+      - name: Migrate test database
+        working-directory: ai-social-platform-backend
+        run: npm run db:migrate
+      - name: Backend unit tests
+        working-directory: ai-social-platform-backend
+        run: npm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: backend
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+          MYSQL_DATABASE: AI_Socialmedia
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    env:
+      DATABASE_URL: mysql://root@127.0.0.1:3306/AI_Socialmedia
+      REDIS_URL: redis://127.0.0.1:6379
+      JWT_SECRET: ci-test-jwt-secret-min-32-characters-long
+      ENCRYPTION_KEY: ci-encryption-key-32-chars-min!!
+      SUPERADMIN_EMAIL: admin@example.com
+      SUPERADMIN_PASSWORD: Admin123!
+      E2E_ADMIN_EMAIL: admin@example.com
+      E2E_ADMIN_PASSWORD: Admin123!
+      API_URL: http://localhost:3000
+      BASE_URL: http://localhost:5173
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install backend
+        working-directory: ai-social-platform-backend
+        run: npm ci
+      - name: Install frontend
+        working-directory: ai-social-platform-frontend
+        run: npm ci
+      - name: Install e2e
+        working-directory: e2e
+        run: npm ci
+      - name: Migrate and seed
+        working-directory: ai-social-platform-backend
+        run: npm run db:migrate && npm run db:seed-superadmin
+      - name: Build frontend
+        working-directory: ai-social-platform-frontend
+        run: npm run build
+      - name: Start API
+        working-directory: ai-social-platform-backend
+        run: npm run dev &
+      - name: Start frontend preview
+        working-directory: ai-social-platform-frontend
+        run: npx vite preview --port 5173 &
+      - name: Wait for servers
+        run: npx wait-on http://localhost:3000/health http://localhost:5173 --timeout 120000
+      - name: Install Playwright browsers
+        working-directory: e2e
+        run: npx playwright install chromium --with-deps
+      - name: Run Playwright
+        working-directory: e2e
+        run: npm test
