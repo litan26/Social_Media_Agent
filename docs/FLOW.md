@@ -43,8 +43,8 @@ This document maps each step in the user flow diagram to the implemented feature
 |-----------|--------|--------|
 | Select & edit variant | Done | VariantSelector + textarea |
 | Publish now | Done | `POST /api/posts/:id/publish` |
-| Schedule | Done | `POST /api/posts/:id/schedule` + BullMQ |
-| Queue worker | Done | `publishQueue.ts` (requires Redis) |
+| Schedule | Calendar only | `POST /api/posts/:id/schedule` records the slot; publishing is manual |
+| Queue worker | Removed | No job queue — use Publish Now at the scheduled time |
 
 ## 06 — Analytics & loop
 

@@ -17,7 +17,13 @@ export interface OAuthTokens {
   accessToken: string;
   refreshToken: string;
   expiresAt: Date;
+  /** Platform-specific ids (Facebook Page id, Instagram Business user id). */
+  metadata?: Record<string, unknown>;
 }
+
+/** Graph API version used across the Facebook + Instagram integrations. */
+const GRAPH_VERSION = 'v21.0';
+const GRAPH = `https://graph.facebook.com/${GRAPH_VERSION}`;
 
 function apiUrl(): string {
   return process.env.API_URL || process.env.CALLBACK_BASE || 'http://localhost:3000';
@@ -66,24 +72,43 @@ export function buildPlatformAuthUrl(
       return `https://www.linkedin.com/oauth/v2/authorization?${params}`;
     }
     case 'facebook': {
+      // Page publishing needs pages_manage_posts, which in turn requires
+      // pages_read_engagement + pages_show_list to be granted alongside it.
+      // Meta reports permissions the app has not been granted as "Invalid
+      // Scopes", so FACEBOOK_SCOPES allows trimming the list while the app is
+      // still being set up in the dashboard.
       const params = new URLSearchParams({
         client_id: process.env.FACEBOOK_APP_ID || '',
         redirect_uri: redirectUri(platform),
         state,
-        scope: 'public_profile,email,pages_show_list,pages_manage_posts',
         response_type: 'code',
       });
-      return `https://www.facebook.com/v21.0/dialog/oauth?${params}`;
+
+      // Facebook Login for Business ignores `scope` — permissions come from the
+      // dashboard Login Configuration. Classic Facebook Login uses `scope`.
+      const configId = process.env.FACEBOOK_CONFIG_ID;
+      if (configId) {
+        params.set('config_id', configId);
+      } else {
+        params.set(
+          'scope',
+          process.env.FACEBOOK_SCOPES ||
+            'public_profile,pages_show_list,pages_read_engagement,pages_manage_posts'
+        );
+      }
+      return `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth?${params}`;
     }
     case 'instagram': {
+      // Instagram API with Instagram Login — standalone flow, no Facebook Page
+      // required. Basic Display (api.instagram.com/oauth) was shut down 2024-12-04.
       const params = new URLSearchParams({
         client_id: process.env.INSTAGRAM_APP_ID || '',
         redirect_uri: redirectUri(platform),
-        scope: 'user_profile,user_media',
+        scope: 'instagram_business_basic,instagram_business_content_publish',
         response_type: 'code',
         state,
       });
-      return `https://api.instagram.com/oauth/authorize?${params}`;
+      return `https://www.instagram.com/oauth/authorize?${params}`;
     }
     case 'tiktok': {
       const params = new URLSearchParams({
@@ -215,7 +240,7 @@ async function exchangeLinkedIn(code: string): Promise<OAuthTokens> {
 }
 
 async function exchangeFacebook(code: string): Promise<OAuthTokens> {
-  const tokenRes = await axios.get('https://graph.facebook.com/v21.0/oauth/access_token', {
+  const tokenRes = await axios.get(`${GRAPH}/oauth/access_token`, {
     params: {
       client_id: process.env.FACEBOOK_APP_ID,
       client_secret: process.env.FACEBOOK_APP_SECRET,
@@ -224,38 +249,54 @@ async function exchangeFacebook(code: string): Promise<OAuthTokens> {
     },
   });
 
-  let accessToken = tokenRes.data.access_token as string;
+  let userToken = tokenRes.data.access_token as string;
   let expiresIn = tokenRes.data.expires_in as number | undefined;
 
   try {
-    const longLived = await axios.get('https://graph.facebook.com/v21.0/oauth/access_token', {
+    const longLived = await axios.get(`${GRAPH}/oauth/access_token`, {
       params: {
         grant_type: 'fb_exchange_token',
         client_id: process.env.FACEBOOK_APP_ID,
         client_secret: process.env.FACEBOOK_APP_SECRET,
-        fb_exchange_token: accessToken,
+        fb_exchange_token: userToken,
       },
     });
-    accessToken = longLived.data.access_token;
+    userToken = longLived.data.access_token;
     expiresIn = longLived.data.expires_in;
   } catch {
     // keep short-lived token
   }
 
-  const profile = await axios.get('https://graph.facebook.com/me', {
-    params: { fields: 'id,name', access_token: accessToken },
+  // A user token cannot post to a Page — publishing needs the Page's own token.
+  // Page tokens derived from a long-lived user token do not expire, which is
+  // what makes scheduled publishing work while the user is offline.
+  const pagesRes = await axios.get(`${GRAPH}/me/accounts`, {
+    params: { fields: 'id,name,access_token', access_token: userToken },
   });
 
+  const page = pagesRes.data?.data?.[0];
+  if (!page) {
+    throw new Error(
+      'No Facebook Page found. Create a Page and grant it during login, then reconnect.'
+    );
+  }
+
   return {
-    handle: String(profile.data.name || profile.data.id).replace(/\s+/g, '_').toLowerCase(),
-    accessToken,
+    handle: String(page.name || page.id).replace(/\s+/g, '_').toLowerCase(),
+    platformUserId: String(page.id),
+    // Store the Page token as the publishing credential.
+    accessToken: page.access_token,
     refreshToken: '',
-    expiresAt: expiresIn
-      ? new Date(Date.now() + expiresIn * 1000)
-      : defaultExpiry(60),
+    expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000) : defaultExpiry(60),
+    metadata: { pageId: String(page.id), pageName: page.name, userToken },
   };
 }
 
+/**
+ * Instagram API with Instagram Login — independent of Facebook.
+ * The account must be Professional (Business or Creator); personal accounts
+ * cannot authorize these scopes.
+ */
 async function exchangeInstagram(code: string): Promise<OAuthTokens> {
   const shortRes = await axios.post(
     'https://api.instagram.com/oauth/access_token',
@@ -269,7 +310,9 @@ async function exchangeInstagram(code: string): Promise<OAuthTokens> {
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
   );
 
+  // Instagram Login returns the short-lived token alongside the IG user id.
   const shortToken = shortRes.data.access_token as string;
+  const igUserId = String(shortRes.data.user_id ?? '');
 
   const longRes = await axios.get('https://graph.instagram.com/access_token', {
     params: {
@@ -283,14 +326,35 @@ async function exchangeInstagram(code: string): Promise<OAuthTokens> {
   const expiresIn = longRes.data.expires_in as number;
 
   const profile = await axios.get('https://graph.instagram.com/me', {
-    params: { fields: 'id,username', access_token: accessToken },
+    params: { fields: 'id,username,profile_picture_url', access_token: accessToken },
   });
 
+  const userId = String(profile.data.id || igUserId);
+
   return {
-    handle: profile.data.username || String(profile.data.id),
+    handle: profile.data.username || userId,
+    platformUserId: userId,
+    avatarUrl: profile.data.profile_picture_url || undefined,
     accessToken,
     refreshToken: '',
     expiresAt: new Date(Date.now() + (expiresIn || 5184000) * 1000),
+    metadata: { igUserId: userId },
+  };
+}
+
+/**
+ * Long-lived Instagram tokens last 60 days and are refreshable while valid.
+ * Call before expiry to keep scheduled publishing alive.
+ */
+export async function refreshInstagramToken(
+  accessToken: string
+): Promise<{ accessToken: string; expiresAt: Date }> {
+  const res = await axios.get('https://graph.instagram.com/refresh_access_token', {
+    params: { grant_type: 'ig_refresh_token', access_token: accessToken },
+  });
+  return {
+    accessToken: res.data.access_token as string,
+    expiresAt: new Date(Date.now() + ((res.data.expires_in as number) || 5184000) * 1000),
   };
 }
 

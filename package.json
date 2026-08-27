@@ -1,0 +1,10 @@
+{
+  "name": "ai-social-platform",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:backend": "npm --prefix ai-social-platform-backend run dev",
+    "dev:frontend": "npm --prefix ai-social-platform-frontend run dev"
+  }
+}

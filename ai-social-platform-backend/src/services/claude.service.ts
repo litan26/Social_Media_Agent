@@ -1,12 +1,46 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { pool, setCurrentUser } from '../db/connection.js';
+import OpenAI from 'openai';
 import { PlanService } from './plan.service.js';
 import { assemblePromptContext } from './promptContext.service.js';
+import { getMaxTokensFor } from '../config/platformLimits.js';
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  maxRetriesPerRequest: 3,
-});
+/** Model used for every post generation. */
+const MODEL = process.env.GROQ_MODEL?.trim() || 'llama-3.3-70b-versatile';
+
+/** Groq exposes an OpenAI-compatible API, so the OpenAI SDK drives it. */
+export const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
+
+export class MissingApiKeyError extends Error {
+  readonly statusCode = 503;
+
+  constructor() {
+    super(
+      'Groq API key is not configured. Set GROQ_API_KEY in the backend .env file and restart the server.'
+    );
+    this.name = 'MissingApiKeyError';
+  }
+}
+
+let client: OpenAI | null = null;
+
+/**
+ * Built lazily so the server still boots without a key — only generation
+ * fails, and with a message that says exactly what to do. (The OpenAI
+ * constructor throws on a missing key, so eager construction breaks boot.)
+ */
+function getClient(): OpenAI {
+  const apiKey = process.env.GROQ_API_KEY?.trim();
+  if (!apiKey) throw new MissingApiKeyError();
+
+  if (!client) {
+    client = new OpenAI({ apiKey, baseURL: GROQ_BASE_URL, maxRetries: 3 });
+  }
+  return client;
+}
+
+/** True when a key is present — lets routes report status without generating. */
+export function isClaudeConfigured(): boolean {
+  return Boolean(process.env.GROQ_API_KEY?.trim());
+}
 
 export interface PostVariants {
   variantA: string;
@@ -42,6 +76,7 @@ export class ClaudeService {
     platforms: string[],
     options?: { tone?: string; keywords?: string[]; jwtPlan?: string | null }
   ): Promise<PostVariants> {
+    const openai = getClient();
     await this.assertGenerationLimit(userId, options?.jwtPlan);
     const { systemPrompt, userMessage } = await assemblePromptContext(
       userId,
@@ -50,16 +85,23 @@ export class ClaudeService {
       options
     );
 
-    const message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
+    const completion = await openai.chat.completions.create({
+      model: MODEL,
+      max_tokens: getMaxTokensFor(platforms),
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
     });
 
-    const response = message.content[0];
-    if (response.type !== 'text') throw new Error('Unexpected response type');
-    return parseVariantsFromText(response.text);
+    const choice = completion.choices[0];
+    if (choice?.finish_reason === 'content_filter') {
+      throw new Error('The model declined this topic. Try rephrasing it.');
+    }
+
+    const text = choice?.message?.content ?? '';
+    if (!text) throw new Error('The model returned an empty response');
+    return parseVariantsFromText(text);
   }
 
   static async *streamPostVariants(
@@ -73,6 +115,7 @@ export class ClaudeService {
     | { type: 'hashtags'; tags: string[] }
     | { type: 'done'; variants: PostVariants; platform: string }
   > {
+    const openai = getClient();
     await this.assertGenerationLimit(userId, options?.jwtPlan);
     const { systemPrompt, userMessage, suggestedHashtags } = await assemblePromptContext(
       userId,
@@ -83,36 +126,46 @@ export class ClaudeService {
 
     yield { type: 'hashtags', tags: suggestedHashtags };
 
-    const stream = client.messages.stream({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
+    const stream = await openai.chat.completions.create({
+      model: MODEL,
+      max_tokens: getMaxTokensFor([platform]),
+      stream: true,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
     });
 
     let fullText = '';
+    let finishReason: string | null = null;
     const emitted = new Set<'A' | 'B' | 'C'>();
 
-    for await (const event of stream) {
-      if (
-        event.type === 'content_block_delta' &&
-        event.delta.type === 'text_delta'
-      ) {
-        fullText += event.delta.text;
-        yield { type: 'delta', text: event.delta.text };
+    for await (const chunk of stream) {
+      const choice = chunk.choices[0];
+      if (!choice) continue;
+      if (choice.finish_reason) finishReason = choice.finish_reason;
 
-        for (const key of ['A', 'B', 'C'] as const) {
-          if (emitted.has(key)) continue;
-          const trimmed = extractVariant(fullText, key);
-          const ready =
-            (key === 'A' && fullText.includes('---VARIANT_B---')) ||
-            (key === 'B' && fullText.includes('---VARIANT_C---'));
-          if (ready && trimmed) {
-            emitted.add(key);
-            yield { type: 'variant', key, content: trimmed, platform };
-          }
+      const delta = choice.delta?.content;
+      if (!delta) continue;
+
+      fullText += delta;
+      yield { type: 'delta', text: delta };
+
+      for (const key of ['A', 'B', 'C'] as const) {
+        if (emitted.has(key)) continue;
+        const trimmed = extractVariant(fullText, key);
+        const ready =
+          (key === 'A' && fullText.includes('---VARIANT_B---')) ||
+          (key === 'B' && fullText.includes('---VARIANT_C---'));
+        if (ready && trimmed) {
+          emitted.add(key);
+          yield { type: 'variant', key, content: trimmed, platform };
         }
       }
+    }
+
+    if (finishReason === 'content_filter') {
+      throw new Error('The model declined this topic. Try rephrasing it.');
     }
 
     const variants = parseVariantsFromText(fullText);

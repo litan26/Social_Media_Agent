@@ -226,7 +226,8 @@ router.post('/schedule', authMiddleware, async (req: AuthRequest, res) => {
     );
     res.json({
       success: true,
-      message: result.queued ? 'Post scheduled' : 'Saved but Redis unavailable — job not queued',
+      message:
+        'Saved to the calendar. Automatic publishing is disabled — use Publish Now at the scheduled time.',
       queued: result.queued,
       scheduled: result.scheduled,
     });

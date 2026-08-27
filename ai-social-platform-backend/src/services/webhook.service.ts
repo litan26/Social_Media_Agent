@@ -35,13 +35,12 @@ export class WebhookService {
     platform: string,
     platformPostId: string
   ): Promise<{ userId: number; postId: number } | null> {
-    const jsonPath = `$.${platform}`;
     const result = await pool.query(
       `SELECT id AS post_id, user_id
        FROM posts
-       WHERE JSON_UNQUOTE(JSON_EXTRACT(platform_post_ids, ?)) = ?
+       WHERE platform_post_ids ->> $1 = $2
        LIMIT 1`,
-      [jsonPath, platformPostId]
+      [platform, platformPostId]
     );
     if (result.rows.length === 0) return null;
     const row = result.rows[0] as { post_id: number; user_id: number };

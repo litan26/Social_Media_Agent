@@ -159,13 +159,13 @@ export class PaymentService {
       await pool.query(
         `INSERT INTO subscriptions (user_id, plan, stripe_customer_id, stripe_subscription_id, stripe_product_id, stripe_price_id, status, current_period_start, current_period_end)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON DUPLICATE KEY UPDATE
-         plan = VALUES(plan),
-         stripe_customer_id = VALUES(stripe_customer_id),
-         stripe_subscription_id = VALUES(stripe_subscription_id),
-         status = VALUES(status),
-         current_period_start = VALUES(current_period_start),
-         current_period_end = VALUES(current_period_end),
+         ON CONFLICT (user_id) DO UPDATE SET
+         plan = EXCLUDED.plan,
+         stripe_customer_id = EXCLUDED.stripe_customer_id,
+         stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+         status = EXCLUDED.status,
+         current_period_start = EXCLUDED.current_period_start,
+         current_period_end = EXCLUDED.current_period_end,
          updated_at = CURRENT_TIMESTAMP`,
         [
           userId,

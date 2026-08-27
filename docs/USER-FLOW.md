@@ -24,7 +24,7 @@ This document maps the implemented app to the full user flow diagram.
 
 - **Token refresh** — every 6 hours (`tokenRefreshWorker.ts`)
 - **Analytics collection** — every 12 hours (`analyticsWorker.ts`)
-- **Scheduled publish** — BullMQ when Redis is running (`publishQueue.ts`)
+- **Scheduled publish** — removed; scheduled posts are saved to the calendar and published manually via Publish Now
 
 ## Notes
 

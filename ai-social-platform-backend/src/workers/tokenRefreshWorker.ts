@@ -32,7 +32,7 @@ cron.schedule('0 * * * *', async () => {
       `SELECT id, user_id, platform, refresh_token
        FROM social_accounts
        WHERE user_id IS NOT NULL
-         AND expires_at < DATE_ADD(NOW(), INTERVAL 48 HOUR)
+         AND expires_at < NOW() + INTERVAL '48 hours'
          AND refresh_token IS NOT NULL AND refresh_token != ''`
     );
 

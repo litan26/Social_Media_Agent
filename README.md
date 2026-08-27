@@ -35,11 +35,8 @@ See [docs/SETUP.md](docs/SETUP.md) for full setup instructions.
 # Terminal 1 — Database
 cd ai-social-platform-backend && docker compose up -d
 
-# Terminal 2 — API
-cd ai-social-platform-backend && cp .env.example .env && npm run dev
-
-# Terminal 3 — UI
-cd ai-social-platform-frontend && cp .env.example .env && npm run dev
+# Terminal 2 — API + UI
+npm run dev
 ```
 
 ## License

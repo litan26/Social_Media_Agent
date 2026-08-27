@@ -15,12 +15,14 @@ import webhookRoutes from './routes/webhooks.routes.js';
 import trendsRoutes from './routes/trends.routes.js';
 import suggestionsRoutes from './routes/suggestions.routes.js';
 import creativeRoutes from './routes/creative.routes.js';
-import { startAnalyticsPolling, startAnalyticsWorker } from './queues/analyticsQueue.js';
 import paymentRoutes from './routes/payment.routes.js';
 import paymentWebhookRoutes from './routes/payment.webhook.routes.js';
 import { errorMiddleware } from './middleware/error.middleware.js';
+import {
+  LOCAL_PUBLIC_PREFIX,
+  LOCAL_STORAGE_ROOT,
+} from './services/imageStorage.service.js';
 import { initSentry } from './instrument.js';
-import { startPublishWorker } from './queues/publishQueue.js';
 import './workers/tokenRefreshWorker.js';
 import './workers/insightsWorker.js';
 
@@ -53,6 +55,17 @@ app.use('/api/webhooks', express.raw({ type: 'application/json' }), webhookRoute
 app.use('/api/payment/webhook', express.raw({ type: 'application/json' }), paymentWebhookRoutes);
 app.use(express.json());
 
+// Generated creative images on local disk. helmet() defaults CORP to
+// same-origin, which would block the frontend on another port from loading
+// these, so relax it for static assets only.
+app.use(
+  LOCAL_PUBLIC_PREFIX,
+  express.static(LOCAL_STORAGE_ROOT, {
+    maxAge: '7d',
+    setHeaders: (res) => res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'),
+  })
+);
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'ai-social-platform-backend' });
 });
@@ -71,12 +84,6 @@ app.use('/api/creative', creativeRoutes);
 app.use('/api/payment', paymentRoutes);
 
 app.use(errorMiddleware);
-
-if (process.env.NODE_ENV !== 'test') {
-  startPublishWorker();
-  startAnalyticsWorker();
-  void startAnalyticsPolling();
-}
 
 app.listen(PORT, () => {
   console.log(`AI Social Platform API running on http://localhost:${PORT}`);

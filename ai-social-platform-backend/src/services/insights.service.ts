@@ -1,8 +1,21 @@
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { pool, setCurrentUser } from '../db/connection.js';
 import { AnalyticsService } from './analytics.service.js';
+import { GROQ_BASE_URL } from './claude.service.js';
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetriesPerRequest: 3 });
+/**
+ * Lazy: the OpenAI constructor throws when the key is absent, so building it
+ * at module scope would crash the server on import instead of at call time.
+ */
+let openai: OpenAI | null = null;
+function client(): OpenAI {
+  if (!openai) {
+    const apiKey = process.env.GROQ_API_KEY?.trim();
+    if (!apiKey) throw new Error('GROQ_API_KEY is not configured');
+    openai = new OpenAI({ apiKey, baseURL: GROQ_BASE_URL, maxRetries: 3 });
+  }
+  return openai;
+}
 
 export interface AiInsightsJson {
   best_times: string[];
@@ -85,7 +98,7 @@ export class InsightsService {
        FROM posts p
        JOIN post_analytics a ON a.post_id = p.id AND a.user_id = p.user_id
        WHERE p.user_id = $1
-         AND p.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)`,
+         AND p.created_at >= NOW() - INTERVAL '30 days'`,
       [userId]
     );
 
@@ -95,20 +108,23 @@ export class InsightsService {
       const fallback: AiInsightsJson = {
         best_times: ['9:00 AM', '5:00 PM'],
         top_tones: ['professional', 'casual'],
-        recommended_topics: dataResult.rows
+        recommended_topics: (dataResult.rows as { content: string }[])
           .slice(0, 3)
-          .map((r: { content: string }) => String(r.content).slice(0, 40)),
+          .map((r) => String(r.content).slice(0, 40)),
       };
       await this.upsertAiInsights(userId, fallback);
       return fallback;
     }
 
-    const message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+    const completion = await client().chat.completions.create({
+      model: process.env.GROQ_MODEL?.trim() || 'llama-3.3-70b-versatile',
       max_tokens: 1024,
-      system:
-        'You analyze social media performance. Return JSON only with this exact shape: {"best_times":["string"],"top_tones":["string"],"recommended_topics":["string"]}. No markdown.',
       messages: [
+        {
+          role: 'system',
+          content:
+            'You analyze social media performance. Return JSON only with this exact shape: {"best_times":["string"],"top_tones":["string"],"recommended_topics":["string"]}. No markdown.',
+        },
         {
           role: 'user',
           content: `Analyze these posts from the last 30 days and extract insights:\n${JSON.stringify(dataResult.rows)}`,
@@ -116,12 +132,12 @@ export class InsightsService {
       ],
     });
 
-    const block = message.content[0];
-    if (block.type !== 'text') return null;
+    const text = completion.choices[0]?.message?.content;
+    if (!text) return null;
 
     let parsed: AiInsightsJson;
     try {
-      const jsonText = block.text.replace(/```json?\s*|\s*```/g, '').trim();
+      const jsonText = text.replace(/```json?\s*|\s*```/g, '').trim();
       parsed = JSON.parse(jsonText) as AiInsightsJson;
     } catch {
       return null;
@@ -135,10 +151,10 @@ export class InsightsService {
     await pool.query(
       `INSERT INTO user_preferences (user_id, ai_insights, best_posting_times, top_topics, updated_at)
        VALUES ($1, $2, $3, $4, NOW())
-       ON DUPLICATE KEY UPDATE
-         ai_insights = VALUES(ai_insights),
-         best_posting_times = VALUES(best_posting_times),
-         top_topics = VALUES(top_topics),
+       ON CONFLICT (user_id) DO UPDATE SET
+         ai_insights = EXCLUDED.ai_insights,
+         best_posting_times = EXCLUDED.best_posting_times,
+         top_topics = EXCLUDED.top_topics,
          updated_at = NOW()`,
       [
         userId,
@@ -154,7 +170,7 @@ export class InsightsService {
       `SELECT DISTINCT p.user_id
        FROM posts p
        JOIN post_analytics a ON a.post_id = p.id
-       WHERE p.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)`
+       WHERE p.created_at >= NOW() - INTERVAL '30 days'`
     );
 
     for (const row of users.rows as { user_id: number }[]) {

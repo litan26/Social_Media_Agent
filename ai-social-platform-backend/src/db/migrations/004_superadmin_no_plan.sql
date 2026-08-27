@@ -2,7 +2,8 @@
 
 ALTER TABLE users DROP CONSTRAINT IF EXISTS chk_users_plan;
 
-ALTER TABLE users MODIFY plan VARCHAR(20) NULL DEFAULT 'free';
+ALTER TABLE users ALTER COLUMN plan DROP NOT NULL;
+ALTER TABLE users ALTER COLUMN plan SET DEFAULT 'free';
 
 ALTER TABLE users ADD CONSTRAINT chk_users_plan CHECK (
   plan IS NULL OR plan IN ('free', 'pro', 'team')

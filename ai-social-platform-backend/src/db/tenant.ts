@@ -1,10 +1,10 @@
-import type { RowDataPacket } from 'mysql2';
+import type { Row } from './connection.js';
 import { pool, query, setCurrentUser } from './connection.js';
 
 /**
  * All tenant data access must go through helpers that require userId from JWT (never from body).
  */
-export async function scopedQuery<T = RowDataPacket>(
+export async function scopedQuery<T = Row>(
   userId: number,
   sql: string,
   params: unknown[] = []

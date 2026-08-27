@@ -1,29 +1,40 @@
 import { Router } from 'express';
-import Anthropic from '@anthropic-ai/sdk';
-import { authMiddleware } from '../middleware/auth.middleware.js';
+import OpenAI from 'openai';
+import { authMiddleware, AuthRequest } from '../middleware/auth.middleware.js';
 import { pool, setCurrentUser } from '../db/connection.js';
+import { GROQ_BASE_URL } from '../services/claude.service.js';
 
 const router = Router();
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetriesPerRequest: 3 });
+/** Lazy: the OpenAI constructor throws without a key, which would crash boot. */
+let openai: OpenAI | null = null;
+function client(): OpenAI {
+  if (!openai) {
+    const apiKey = process.env.GROQ_API_KEY?.trim();
+    if (!apiKey) throw new Error('GROQ_API_KEY is not configured');
+    openai = new OpenAI({ apiKey, baseURL: GROQ_BASE_URL, maxRetries: 3 });
+  }
+  return openai;
+}
 
 const cache = new Map<number, { data: unknown; at: number }>();
 const CACHE_TTL = 60 * 60 * 1000;
 
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authMiddleware, async (req: AuthRequest, res) => {
+  const userId = req.userId!;
   const forceRefresh = req.query.refresh === '1';
-  const cached = cache.get(req.userId);
+  const cached = cache.get(userId);
   if (!forceRefresh && cached && Date.now() - cached.at < CACHE_TTL) {
     res.json(cached.data);
     return;
   }
 
   try {
-    await setCurrentUser(req.userId);
+    await setCurrentUser(userId);
 
     const [userResult, postsResult, accountsResult] = await Promise.all([
-      pool.query('SELECT industry, email, business_type FROM users WHERE id = $1', [req.userId]),
-      pool.query('SELECT content, status FROM posts WHERE user_id = $1 ORDER BY created_at DESC LIMIT 5', [req.userId]),
-      pool.query('SELECT platform, account_handle FROM social_accounts WHERE user_id = $1', [req.userId]),
+      pool.query('SELECT industry, email, business_type FROM users WHERE id = $1', [userId]),
+      pool.query('SELECT content, status FROM posts WHERE user_id = $1 ORDER BY created_at DESC LIMIT 5', [userId]),
+      pool.query('SELECT platform, account_handle FROM social_accounts WHERE user_id = $1', [userId]),
     ]);
 
     const user = userResult.rows[0] || {};
@@ -68,20 +79,19 @@ router.get('/', authMiddleware, async (req, res) => {
 
     const prompt = `Today is ${today}.\n\nYou are a social media content strategist specializing in the ${industryCtx} industry. Generate 12 fresh, timely, and industry-specific post ideas for a user who posts on: ${platformList}.\n\n${recentCtx}\n\n${industryAngles}\n\nRequirements for EACH of the 12 ideas:\n- Be specific, actionable, and highly relevant to ${industryCtx}\n- Reflect current events, trends, or timely angles for ${today}\n- Vary the content types: at least 2 educational, 2 opinion, 2 story, 2 question, 2 list, 2 tip\n- Each idea must feel authentic to the ${industryCtx} space—not generic\n- Choose tone based on industry best practices: healthcare/finance/legal → professional; retail/food/lifestyle → casual; tech/startups → bold; nonprofits → professional or casual\n- Tone must be one of: professional, casual, bold\n\nRespond ONLY with a valid JSON array of exactly 12 objects. No markdown, no explanation, just the JSON.\n\nFormat:\n[\n  {\n    "title": "Short catchy headline (max 8 words)",\n    "topic": "The full post idea/prompt (1-2 sentences, specific and actionable)",\n    "type": "educational|opinion|story|question|list|tip",\n    "tone": "professional|casual|bold",\n    "hook": "Opening line to grab attention (max 15 words)"\n  }\n]`;
 
-    const message = await client.messages.create({
-      model: 'claude-opus-4-8',
-      thinking: { type: 'adaptive' },
+    const completion = await client().chat.completions.create({
+      model: process.env.GROQ_MODEL?.trim() || 'llama-3.3-70b-versatile',
       max_tokens: 3000,
       messages: [{ role: 'user', content: prompt }],
     });
 
-    const textBlock = message.content.find((b) => b.type === 'text');
-    if (!textBlock || textBlock.type !== 'text') {
-      throw new Error('No text response from Claude');
+    const text = completion.choices[0]?.message?.content;
+    if (!text) {
+      throw new Error('No text response from the model');
     }
 
-    const jsonMatch = textBlock.text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) throw new Error('Claude did not return a JSON array');
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) throw new Error('The model did not return a JSON array');
 
     const suggestions = JSON.parse(jsonMatch[0]);
     const data = {
@@ -92,7 +102,7 @@ router.get('/', authMiddleware, async (req, res) => {
       total: suggestions.length,
     };
 
-    cache.set(req.userId, { data, at: Date.now() });
+    cache.set(userId, { data, at: Date.now() });
     res.json(data);
   } catch (err: any) {
     console.error('Suggestions generation failed:', err.message);

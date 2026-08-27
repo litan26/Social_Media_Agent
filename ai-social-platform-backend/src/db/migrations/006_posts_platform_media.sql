@@ -1,3 +1,3 @@
 -- Platform target + media attachments for posts
-ALTER TABLE posts ADD COLUMN platform VARCHAR(50) NULL AFTER user_id;
-ALTER TABLE posts ADD COLUMN media_urls JSON DEFAULT (JSON_ARRAY());
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS platform VARCHAR(50) NULL;
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS media_urls JSONB DEFAULT '[]'::jsonb;

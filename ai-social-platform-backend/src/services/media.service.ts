@@ -96,9 +96,9 @@ export class MediaService {
 
     await pool.query(
       `UPDATE posts
-       SET media_urls = JSON_ARRAY_APPEND(COALESCE(media_urls, JSON_ARRAY()), '$', ?),
+       SET media_urls = COALESCE(media_urls, '[]'::jsonb) || to_jsonb($1::text),
            updated_at = NOW()
-       WHERE id = ? AND user_id = ?`,
+       WHERE id = $2 AND user_id = $3`,
       [mediaUrl, postId, userId]
     );
 

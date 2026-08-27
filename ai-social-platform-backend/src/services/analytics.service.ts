@@ -35,14 +35,14 @@ export class AnalyticsService {
       `INSERT INTO post_analytics
          (user_id, post_id, platform, platform_post_id, impressions, likes, shares, comments, clicks, ctr, engagement_rate)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       ON DUPLICATE KEY UPDATE
-         impressions = VALUES(impressions),
-         likes = VALUES(likes),
-         shares = VALUES(shares),
-         comments = VALUES(comments),
-         clicks = VALUES(clicks),
-         ctr = VALUES(ctr),
-         engagement_rate = VALUES(engagement_rate),
+       ON CONFLICT (post_id, platform) DO UPDATE SET
+         impressions = EXCLUDED.impressions,
+         likes = EXCLUDED.likes,
+         shares = EXCLUDED.shares,
+         comments = EXCLUDED.comments,
+         clicks = EXCLUDED.clicks,
+         ctr = EXCLUDED.ctr,
+         engagement_rate = EXCLUDED.engagement_rate,
          updated_at = CURRENT_TIMESTAMP,
          data_collected_at = CURRENT_TIMESTAMP`,
       [
@@ -188,8 +188,8 @@ export class AnalyticsService {
     await this.syncPublishedAnalytics(userId);
 
     const heatmapResult = await pool.query(
-      `SELECT HOUR(COALESCE(p.published_at, p.created_at)) AS hour,
-              AVG(a.clicks / NULLIF(a.impressions, 0)) AS avg_ctr
+      `SELECT EXTRACT(HOUR FROM COALESCE(p.published_at, p.created_at))::int AS hour,
+              AVG(a.clicks::numeric / NULLIF(a.impressions, 0)) AS avg_ctr
        FROM posts p
        JOIN post_analytics a ON a.post_id = p.id AND a.user_id = p.user_id
        WHERE p.user_id = $1
@@ -205,7 +205,7 @@ export class AnalyticsService {
               SUM(a.impressions) AS total_reach
        FROM post_analytics a
        WHERE a.user_id = $1
-         AND a.data_collected_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+         AND a.data_collected_at >= NOW() - INTERVAL '30 days'
        GROUP BY DATE(a.data_collected_at)
        ORDER BY day ASC`,
       [userId]

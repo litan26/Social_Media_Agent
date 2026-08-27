@@ -17,8 +17,37 @@ export function getTightestLimit(platforms: string[]): number {
   return Math.min(...platforms.map(getCharLimit));
 }
 
+/**
+ * Length the post should actually aim for, per platform — distinct from the
+ * hard ceiling. Models treat a stated maximum as a target and overshoot, so
+ * the prompt needs a concrete range to write to.
+ */
+export const PLATFORM_TARGET_RANGES: Record<string, [number, number]> = {
+  twitter: [120, 240],
+  linkedin: [600, 1200],
+  instagram: [300, 700],
+  facebook: [300, 700],
+  tiktok: [100, 250],
+  pinterest: [150, 350],
+  youtube: [200, 500],
+};
+
+export function getTargetRange(platform: string): [number, number] {
+  return PLATFORM_TARGET_RANGES[platform] ?? [200, 500];
+}
+
 export function formatPlatformConstraints(platforms: string[]): string {
   return platforms
-    .map((p) => `- ${p}: ${getCharLimit(p)} characters max`)
+    .map((p) => {
+      const [lo, hi] = getTargetRange(p);
+      return `- ${p}: each variant must be at least ${lo} characters and at most ${hi} (absolute ceiling ${getCharLimit(p)})`;
+    })
     .join('\n');
+}
+
+/** Token budget sized to the tightest platform, so output can't run long. */
+export function getMaxTokensFor(platforms: string[]): number {
+  const tightest = getTightestLimit(platforms);
+  // ~4 chars/token, 3 variants, plus room for delimiters and hashtags.
+  return Math.min(2000, Math.max(400, Math.ceil((tightest / 4) * 3 + 250)));
 }

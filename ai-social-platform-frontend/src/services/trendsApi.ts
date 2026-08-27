@@ -11,6 +11,7 @@ export interface TrendsResponse {
   source: 'twitter' | 'unavailable' | 'error';
   query?: string;
   total_tweets_scanned?: number;
+  total_videos_scanned?: number;
   fetched_at?: string;
   message?: string;
   error?: string;

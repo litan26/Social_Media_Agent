@@ -1,37 +1,27 @@
 version: '3.8'
 services:
-  mysql:
-    image: mysql:8.0
+  postgres:
+    image: postgres:16-alpine
     environment:
-      MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
-      MYSQL_DATABASE: AI_Socialmedia
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: ai_socialmedia
     ports:
-      - '3306:3306'
+      - '5432:5432'
     volumes:
-      - mysql_data:/var/lib/mysql
+      - postgres_data:/var/lib/postgresql/data
       - ./src/db/migrations:/docker-entrypoint-initdb.d
-    command: --default-authentication-plugin=mysql_native_password
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - '6379:6379'
-    volumes:
-      - redis_data:/data
 
   # Local dev ONLY — never deploy to production
-  phpmyadmin:
+  adminer:
     profiles: ['dev']
-    image: phpmyadmin:latest
+    image: adminer:latest
     ports:
-      - '8080:80'
+      - '8080:8080'
     environment:
-      PMA_HOST: mysql
-      PMA_USER: root
-      PMA_PASSWORD: ''
+      ADMINER_DEFAULT_SERVER: postgres
     depends_on:
-      - mysql
+      - postgres
 
 volumes:
-  mysql_data:
-  redis_data:
+  postgres_data:

@@ -1,10 +1,5 @@
 import { pool, setCurrentUser } from '../db/connection.js';
 import { assertPostOwnedByUser } from '../db/tenant.js';
-import {
-  enqueueScheduledPublish,
-  removeScheduledJob,
-  rescheduleScheduledJob,
-} from '../queues/publishQueue.js';
 
 export interface ScheduledRow {
   id: number;
@@ -46,23 +41,9 @@ export class ScheduleService {
       );
       const scheduledPostId = insert.insertId as number;
 
-      const jobId = await enqueueScheduledPublish(
-        scheduledPostId,
-        userId,
-        postId,
-        platform,
-        scheduledAt
-      );
-
-      if (jobId) {
-        queued = true;
-        await pool.query(
-          `UPDATE scheduled_posts SET job_id = $1 WHERE id = $2 AND user_id = $3`,
-          [jobId, scheduledPostId, userId]
-        );
-      }
-
-      scheduled.push({ id: scheduledPostId, platform, jobId });
+      // No background queue: the row is recorded as pending but nothing will
+      // publish it automatically. Use Publish Now at the intended time.
+      scheduled.push({ id: scheduledPostId, platform, jobId: null });
     }
 
     return { scheduled, queued };
@@ -92,26 +73,14 @@ export class ScheduleService {
       throw new Error('Scheduled time must be in the future');
     }
 
-    if (row.job_id) {
-      await removeScheduledJob(row.job_id);
-    }
-
-    const jobId = await rescheduleScheduledJob(
-      scheduledPostId,
-      userId,
-      row.post_id,
-      row.platform,
-      newScheduledAt
-    );
-
     await pool.query(
       `UPDATE scheduled_posts
-       SET scheduled_at = $1, job_id = $2, updated_at = NOW()
-       WHERE id = $3 AND user_id = $4`,
-      [newScheduledAt, jobId, scheduledPostId, userId]
+       SET scheduled_at = $1, job_id = NULL, updated_at = NOW()
+       WHERE id = $2 AND user_id = $3`,
+      [newScheduledAt, scheduledPostId, userId]
     );
 
-    return { jobId };
+    return { jobId: null };
   }
 
   static async getCalendarPosts(userId: number) {

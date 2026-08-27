@@ -8,6 +8,7 @@ import { useAuthStore } from '../../store/authStore';
 import { attachMediaUrl, uploadBrandLogo, uploadPostMedia } from '../../services/mediaApi';
 import { fetchTrends } from '../../services/trendsApi';
 import { generateCreativeImage } from '../../services/creativeApi';
+import { ensureNotifyPermission, notify } from '../../utils/browserNotify';
 
 const CHAR_LIMITS: Record<string, number> = {
   twitter: 280,
@@ -31,6 +32,16 @@ function CharBadge({ content, platforms }: { content: string; platforms: string[
       {len} / {tightest.limit} ({tightest.p})
     </span>
   );
+}
+
+interface GeneratedImage {
+  id: number;
+  url: string;
+  dataUrl: string;
+  quote: string;
+  createdAt: string;
+  /** True once the image has been uploaded onto the post as media. */
+  attached: boolean;
 }
 
 export interface ForcedSuggestion {
@@ -63,9 +74,16 @@ export function PostForm({
   const [mediaUrls, setMediaUrls] = useState<{ url: string; type: 'image' | 'video' }[]>([]);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  // Image generation runs in the background: the form stays fully usable while
+  // it works, and finished images land in the "Generated" section below.
+  const [generatingImage, setGeneratingImage] = useState(false);
+  const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
+  const [attachingImageId, setAttachingImageId] = useState<number | null>(null);
+  const generatedSectionRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const aiPanelRef = useRef<HTMLDivElement>(null);
 
   // AI panel
   const [showAI, setShowAI] = useState(!!initialTopic);
@@ -76,15 +94,11 @@ export function PostForm({
   const [generating, setGenerating] = useState(false);
   const [topicAutoFilled, setTopicAutoFilled] = useState(false);
   const [fetchingTrend, setFetchingTrend] = useState(false);
-  const [creativeImage, setCreativeImage] = useState<string | null>(null);
-  const [creativeHeadline, setCreativeHeadline] = useState<string | null>(null);
-  const [generatingCreative, setGeneratingCreative] = useState(false);
-  const [creativeAdded, setCreativeAdded] = useState(false);
-  const [addingCreative, setAddingCreative] = useState(false);
-  const [postingCreative, setPostingCreative] = useState(false);
   const [viewingImage, setViewingImage] = useState<string | null>(null);
 
-  // When the parent passes a new suggestion (from the industry panel), load it into the AI panel
+  // When the parent passes a new suggestion (from the industry panel), load it
+  // into the AI panel *and* the main composer, so the click visibly changes the
+  // main panel rather than only a collapsed sidebar field.
   useEffect(() => {
     if (!suggestion) return;
     setTopic(suggestion.topic);
@@ -92,6 +106,11 @@ export function PostForm({
     setShowAI(true);
     setAiVariants(null);
     setActiveVariant(null);
+    setTopicAutoFilled(false);
+    // Only seed the composer when the user hasn't written anything yet —
+    // never clobber text they typed.
+    setContent((prev) => (prev.trim() ? prev : suggestion.topic));
+    aiPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [suggestion?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Opening the AI panel with no topic yet — auto-fill from the latest trending topic
@@ -118,31 +137,18 @@ export function PostForm({
     if (!topic.trim()) return;
     setGenerating(true);
     setAiVariants(null);
-    setCreativeImage(null);
-    setCreativeHeadline(null);
-    setCreativeAdded(false);
-    setGeneratingCreative(true);
-
-    const creativePromise = generateCreativeImage(topic, tone)
-      .then((res) => {
-        setCreativeImage(res.dataUrl);
-        setCreativeHeadline(res.headline);
-      })
-      .catch(() => toast('Creative image generation failed', 'error'))
-      .finally(() => setGeneratingCreative(false));
 
     try {
       const data = await generate(topic, platforms, tone);
       if (!data) return;
       setAiVariants({ A: data.variants.variantA, B: data.variants.variantB, C: data.variants.variantC });
       setPostId(data.postId);
-      toast('Creative ready — pick a caption and review the image', 'success');
+      toast('Captions ready — pick one to continue', 'success');
     } catch (e: unknown) {
       toast(e instanceof Error ? e.message : 'Generation failed', 'error');
     } finally {
       setGenerating(false);
     }
-    await creativePromise;
   };
 
   const ensureSaved = async (contentOverride?: string) => {
@@ -154,44 +160,6 @@ export function PostForm({
     const data = await createDraft(finalContent, platforms);
     setPostId(data.postId);
     return data.postId;
-  };
-
-  const addCreativeToPost = async () => {
-    if (!creativeImage || addingCreative) return;
-    setAddingCreative(true);
-    try {
-      const id = await ensureSaved(content.trim() || creativeHeadline || topic);
-      await attachMediaUrl(id, creativeImage);
-      setMediaUrls((prev) => [...prev, { url: creativeImage, type: 'image' }]);
-      setCreativeAdded(true);
-      toast('Creative image added to post', 'success');
-    } catch {
-      toast('Failed to attach image to post', 'error');
-    } finally {
-      setAddingCreative(false);
-    }
-  };
-
-  const quickPublishCreative = async () => {
-    if (!creativeImage || postingCreative) return;
-    setPostingCreative(true);
-    try {
-      const captionText = content.trim() || creativeHeadline || topic;
-      const id = await ensureSaved(captionText);
-      if (!creativeAdded) {
-        await attachMediaUrl(id, creativeImage);
-        setMediaUrls((prev) => [...prev, { url: creativeImage, type: 'image' }]);
-        setCreativeAdded(true);
-      }
-      setContent(captionText);
-      await publishPost(id, platforms);
-      toast('Posted to social media!', 'success');
-      navigate('/dashboard');
-    } catch (e: unknown) {
-      toast(e instanceof Error ? e.message : 'Failed to post', 'error');
-    } finally {
-      setPostingCreative(false);
-    }
   };
 
   const pickVariant = (key: 'A' | 'B' | 'C') => {
@@ -236,6 +204,81 @@ export function PostForm({
     }
   };
 
+  const handleGenerateImage = async () => {
+    const quoteText = content.trim() || topic.trim();
+    if (!quoteText) {
+      toast('Add content or a topic before generating an image', 'error');
+      return;
+    }
+
+    // Ask up front, while the click is still a user gesture — browsers reject
+    // permission prompts that come back after an await chain.
+    void ensureNotifyPermission();
+
+    setGeneratingImage(true);
+    toast('Generating your image — keep working, we’ll notify you when it’s ready', 'success');
+
+    try {
+      const result = await generateCreativeImage(quoteText, tone);
+
+      setGeneratedImages((prev) => [
+        { ...result, attached: false },
+        ...prev,
+      ]);
+
+      notify('Your AI image is ready', {
+        body: result.quote ? `“${result.quote}”` : 'Tap to view it in your post composer.',
+        image: result.url,
+        icon: result.url,
+        tag: `creative-image-${result.id}`,
+        onClick: () =>
+          generatedSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
+      });
+
+      toast('AI image ready — see the Generated section below', 'success');
+      generatedSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === 'object' && 'response' in e
+          ? (e as { response?: { data?: { error?: string } } }).response?.data?.error
+          : undefined;
+      const text = msg || (e instanceof Error ? e.message : 'Image generation failed');
+      toast(text, 'error');
+      notify('Image generation failed', { body: text, tag: 'creative-image-error' });
+    } finally {
+      setGeneratingImage(false);
+    }
+  };
+
+  /** Attach a generated image to the post as media. */
+  const handleAttachGenerated = async (image: GeneratedImage) => {
+    setAttachingImageId(image.id);
+    try {
+      const id = postId ?? (await ensureSaved(image.quote || content.trim() || topic.trim()));
+      // The creative endpoint already persisted this image server-side, so we
+      // just point the post at that stored URL — re-uploading it through the
+      // presign flow would need R2 and would duplicate the same bytes.
+      await attachMediaUrl(id, image.url);
+      setMediaUrls((prev) => [...prev, { url: image.dataUrl || image.url, type: 'image' }]);
+      setGeneratedImages((prev) =>
+        prev.map((g) => (g.id === image.id ? { ...g, attached: true } : g)),
+      );
+      toast('Image attached to your post', 'success');
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === 'object' && 'response' in e
+          ? (e as { response?: { data?: { error?: string } } }).response?.data?.error
+          : undefined;
+      toast(msg || 'Failed to attach image', 'error');
+    } finally {
+      setAttachingImageId(null);
+    }
+  };
+
+  const discardGenerated = (id: number) => {
+    setGeneratedImages((prev) => prev.filter((g) => g.id !== id));
+  };
+
   const removeMedia = (idx: number) => {
     setMediaUrls((prev) => prev.filter((_, i) => i !== idx));
   };
@@ -276,6 +319,8 @@ export function PostForm({
     } catch { toast('Schedule failed', 'error'); }
   };
 
+  // Image generation is deliberately excluded: it runs in the background and
+  // must not lock the composer or the publish/schedule actions.
   const busy = generating || streaming || isLoading;
   const variantLabels = { A: 'Professional', B: 'Casual', C: 'Punchy' };
   const variantColors = {
@@ -362,6 +407,15 @@ export function PostForm({
             <span className="text-lg">🖼</span> Add Image
           </button>
 
+          <button
+            type="button"
+            onClick={handleGenerateImage}
+            disabled={generatingImage || (!content.trim() && !topic.trim())}
+            className="flex items-center justify-center gap-2 rounded-xl border border-cyan-500/25 bg-cyan-500/[0.06] px-4 py-3.5 text-sm font-semibold text-cyan-200 transition-all hover:border-cyan-400/50 hover:bg-cyan-500/[0.12] disabled:opacity-40"
+          >
+            ✦ Generate AI Image
+          </button>
+
           <input
             ref={videoInputRef}
             type="file"
@@ -386,7 +440,7 @@ export function PostForm({
         {uploadingMedia && (
           <span className="flex items-center gap-1.5 text-xs text-slate-500">
             <span className="h-3 w-3 animate-spin rounded-full border border-violet-400 border-t-transparent" />
-            Uploading…
+            Uploading...
           </span>
         )}
 
@@ -412,6 +466,87 @@ export function PostForm({
                 </button>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Generated — AI images land here as soon as they finish */}
+        {generatedImages.length > 0 && (
+          <div
+            ref={generatedSectionRef}
+            className="space-y-3 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.03] p-4"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-sm">✦</span>
+              <p className="text-xs font-semibold uppercase tracking-widest text-cyan-300/80">
+                Generated
+              </p>
+              <span className="text-xs text-slate-500">
+                {generatedImages.length} image{generatedImages.length === 1 ? '' : 's'}
+              </span>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              {generatedImages.map((img) => (
+                <div
+                  key={img.id}
+                  className="overflow-hidden rounded-xl border border-white/10 bg-black/30"
+                >
+                  {/* Prefer the inline data URL: the stored `url` is built from
+                      the backend's public API_URL, which isn't reachable in
+                      every environment (e.g. a local run with no tunnel up). */}
+                  <button
+                    type="button"
+                    onClick={() => setViewingImage(img.dataUrl || img.url)}
+                    className="block w-full"
+                  >
+                    <img
+                      src={img.dataUrl || img.url}
+                      alt={img.quote || 'Generated image'}
+                      className="h-40 w-full object-cover transition-transform hover:scale-[1.02]"
+                    />
+                  </button>
+
+                  <div className="space-y-2 p-3">
+                    {img.quote && (
+                      <p className="line-clamp-2 text-xs italic leading-relaxed text-slate-400">
+                        “{img.quote}”
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleAttachGenerated(img)}
+                        disabled={img.attached || attachingImageId === img.id}
+                        className="flex-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/20 disabled:opacity-40"
+                      >
+                        {img.attached
+                          ? '✓ Attached'
+                          : attachingImageId === img.id
+                            ? 'Attaching…'
+                            : 'Attach to post'}
+                      </button>
+                      <a
+                        href={img.dataUrl || img.url}
+                        download={`ai-image-${img.id}.png`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:text-slate-200"
+                      >
+                        Download
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => discardGenerated(img.id)}
+                        className="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-slate-500 transition hover:text-red-300"
+                        aria-label="Discard generated image"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -454,7 +589,7 @@ export function PostForm({
 
       {/* AI generation panel */}
       {showAI && (
-        <div className="animate-fade-in-up space-y-5 bg-violet-500/[0.03] p-5">
+        <div ref={aiPanelRef} className="animate-fade-in-up space-y-5 bg-violet-500/[0.03] p-5">
           <div className="flex items-center gap-2">
             <span className="text-sm">✦</span>
             <p className="text-xs font-semibold uppercase tracking-widest text-violet-300/80">AI Generation</p>
@@ -492,7 +627,7 @@ export function PostForm({
             <div className="flex items-start gap-2 rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-3">
               <span className="text-sm">✦</span>
               <p className="text-[11px] leading-relaxed text-violet-300/80">
-                Claude automatically expands your topic into a unique creative angle for each variant — no keywords needed.
+                The AI automatically expands your topic into a unique angle for each variant — no keywords needed.
               </p>
             </div>
           </div>
@@ -506,72 +641,12 @@ export function PostForm({
             {generating || streaming ? (
               <>
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                Creating image + captions…
+                Generating captions…
               </>
             ) : (
-              <>✦ Generate creative + captions</>
+              <>✦ Generate captions</>
             )}
           </button>
-
-          {/* Creative image preview */}
-          {(generatingCreative || creativeImage) && (
-            <div className="flex items-start gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
-              <button
-                type="button"
-                onClick={() => creativeImage && setViewingImage(creativeImage)}
-                disabled={!creativeImage}
-                className="group relative flex h-32 w-32 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-black/30"
-              >
-                {generatingCreative ? (
-                  <span className="h-6 w-6 animate-spin rounded-full border-2 border-violet-400 border-t-transparent" />
-                ) : creativeImage ? (
-                  <>
-                    <img src={creativeImage} alt="Generated creative" className="h-full w-full object-cover transition-transform group-hover:scale-105" />
-                    <span className="absolute inset-0 hidden items-center justify-center bg-black/50 text-[11px] font-semibold text-white group-hover:flex">
-                      🔍 View full size
-                    </span>
-                  </>
-                ) : null}
-              </button>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold text-slate-300">Creative image</p>
-                {generatingCreative ? (
-                  <p className="mt-0.5 text-[11px] text-slate-500">Crafting a headline and designing a branded visual…</p>
-                ) : creativeHeadline ? (
-                  <p className="mt-0.5 text-[11px] italic leading-relaxed text-violet-300">"{creativeHeadline}"</p>
-                ) : (
-                  <p className="mt-0.5 text-[11px] text-slate-500">Generated from your topic and tone. Add it to the post or regenerate.</p>
-                )}
-                {creativeImage && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setViewingImage(creativeImage)}
-                      className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-semibold text-slate-300 transition-colors hover:border-violet-500/30 hover:text-violet-300"
-                    >
-                      🔍 View
-                    </button>
-                    <button
-                      type="button"
-                      onClick={addCreativeToPost}
-                      disabled={creativeAdded || addingCreative}
-                      className="rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-300 transition-colors hover:bg-violet-500/20 disabled:opacity-50"
-                    >
-                      {addingCreative ? 'Adding…' : creativeAdded ? '✓ Added to post' : 'Add to post →'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={quickPublishCreative}
-                      disabled={postingCreative || platforms.length === 0}
-                      className="rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 px-3 py-1.5 text-xs font-semibold text-white shadow-md shadow-emerald-500/20 transition-all hover:scale-[1.03] disabled:opacity-50 disabled:hover:scale-100"
-                    >
-                      {postingCreative ? 'Posting…' : '🚀 Post Now'}
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* Variant picker */}
           {aiVariants && (
@@ -672,7 +747,7 @@ export function PostForm({
         onClick={() => setViewingImage(null)}
       >
         <div className="relative max-h-full max-w-lg" onClick={(e) => e.stopPropagation()}>
-          <img src={viewingImage} alt="Creative preview" className="max-h-[80vh] w-full rounded-2xl border border-white/10 object-contain shadow-2xl" />
+          <img src={viewingImage} alt="Media preview" className="max-h-[80vh] w-full rounded-2xl border border-white/10 object-contain shadow-2xl" />
           <button
             type="button"
             onClick={() => setViewingImage(null)}

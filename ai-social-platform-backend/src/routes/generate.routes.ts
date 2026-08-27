@@ -1,6 +1,10 @@
 import { Router, Response } from 'express';
 import { authMiddleware, AuthRequest } from '../middleware/auth.middleware.js';
-import { ClaudeService } from '../services/claude.service.js';
+import {
+  ClaudeService,
+  MissingApiKeyError,
+  isClaudeConfigured,
+} from '../services/claude.service.js';
 import { pool, setCurrentUser } from '../db/connection.js';
 import { respondIfPlanLimit } from '../utils/planErrors.js';
 import { PlanService } from '../services/plan.service.js';
@@ -33,6 +37,13 @@ router.post('/', authMiddleware, userRateLimit(RATE_LIMITS.generate), async (req
 
   if (!topic?.trim()) {
     res.status(400).json({ error: 'Topic is required' });
+    return;
+  }
+
+  // Checked before SSE headers go out so a missing key is a clean 503
+  // instead of an error buried in the stream.
+  if (!isClaudeConfigured()) {
+    res.status(503).json({ error: new MissingApiKeyError().message });
     return;
   }
 

@@ -32,7 +32,7 @@ export class OAuthStateService {
     const state = crypto.randomBytes(32).toString('hex');
     await pool.query(
       `INSERT INTO oauth_states (state, user_id, platform, code_verifier, return_to, expires_at)
-       VALUES ($1, $2, $3, $4, $5, DATE_ADD(NOW(), INTERVAL 10 MINUTE))`,
+       VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '10 minutes')`,
       [state, userId, platform, codeVerifier || null, sanitizeOAuthReturnTo(returnTo)]
     );
     return state;

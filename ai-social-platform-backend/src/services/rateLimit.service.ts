@@ -1,7 +1,3 @@
-import { Redis } from 'ioredis';
-import { Ratelimit } from '@upstash/ratelimit';
-import { Redis as UpstashRedis } from '@upstash/redis';
-
 export interface RateLimitConfig {
   prefix: string;
   limit: number;
@@ -9,83 +5,55 @@ export interface RateLimitConfig {
   windowSec: number;
 }
 
-let ioredis: Redis | null = null;
+interface Bucket {
+  count: number;
+  /** Epoch ms when the window expires and the count resets */
+  resetAt: number;
+}
 
-function getIoRedis(): Redis | null {
-  if (ioredis) return ioredis;
-  try {
-    ioredis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
-      maxRetriesPerRequest: 1,
-      lazyConnect: true,
-    });
-    ioredis.on('error', () => {});
-    return ioredis;
-  } catch {
-    return null;
+/**
+ * In-process fixed-window counters. State lives in this process only, so a
+ * multi-instance deployment limits per instance rather than globally.
+ */
+const buckets = new Map<string, Bucket>();
+
+/** Drop expired buckets so the map does not grow without bound. */
+function sweep(now: number): void {
+  for (const [key, bucket] of buckets) {
+    if (bucket.resetAt <= now) buckets.delete(key);
   }
 }
 
-const upstashLimiters = new Map<string, Ratelimit>();
-
-function getUpstashLimiter(config: RateLimitConfig): Ratelimit | null {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return null;
-
-  const key = `${config.prefix}:${config.limit}:${config.windowSec}`;
-  if (!upstashLimiters.has(key)) {
-    const redis = new UpstashRedis({ url, token });
-    upstashLimiters.set(
-      key,
-      new Ratelimit({
-        redis,
-        limiter: Ratelimit.slidingWindow(config.limit, `${config.windowSec} s`),
-        prefix: config.prefix,
-        analytics: true,
-      })
-    );
-  }
-  return upstashLimiters.get(key)!;
-}
+let lastSweep = 0;
+const SWEEP_INTERVAL_MS = 60_000;
 
 export class RateLimitService {
   static async checkUserLimit(userId: number, config: RateLimitConfig): Promise<void> {
-    const identifier = String(userId);
-    const upstash = getUpstashLimiter(config);
+    const now = Date.now();
 
-    if (upstash) {
-      const { success, reset } = await upstash.limit(identifier);
-      if (!success) {
-        throw new RateLimitExceededError(config, reset);
-      }
+    if (now - lastSweep > SWEEP_INTERVAL_MS) {
+      sweep(now);
+      lastSweep = now;
+    }
+
+    const key = `${config.prefix}:${userId}`;
+    const existing = buckets.get(key);
+
+    if (!existing || existing.resetAt <= now) {
+      buckets.set(key, { count: 1, resetAt: now + config.windowSec * 1000 });
       return;
     }
 
-    const redis = getIoRedis();
-    if (!redis) {
-      if (process.env.NODE_ENV === 'production') {
-        console.warn('Rate limiting disabled — configure UPSTASH_REDIS_REST_URL or REDIS_URL');
-      }
-      return;
+    existing.count += 1;
+    if (existing.count > config.limit) {
+      throw new RateLimitExceededError(config, existing.resetAt);
     }
+  }
 
-    try {
-      const { ensureRedisConnected } = await import('../utils/redisConnect.js');
-      await ensureRedisConnected(redis);
-    } catch {
-      return;
-    }
-
-    const bucketKey = `ratelimit:${config.prefix}:${userId}`;
-    const count = await redis.incr(bucketKey);
-    if (count === 1) {
-      await redis.expire(bucketKey, config.windowSec);
-    }
-    if (count > config.limit) {
-      const ttl = await redis.ttl(bucketKey);
-      const reset = Date.now() + Math.max(ttl, 1) * 1000;
-      throw new RateLimitExceededError(config, reset);
-    }
+  /** Test helper — clears all counters. */
+  static reset(): void {
+    buckets.clear();
+    lastSweep = 0;
   }
 }
 

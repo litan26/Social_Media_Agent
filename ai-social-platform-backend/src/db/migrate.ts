@@ -1,29 +1,75 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import mysql from 'mysql2/promise';
+import pg from 'pg';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_NAME = 'AI_Socialmedia';
-
-function getBaseUrl(): string {
-  const url = process.env.DATABASE_URL || `mysql://root@localhost:3306/${DB_NAME}`;
-  return url.replace(/\/[^/?]+(\?.*)?$/, '/');
-}
 
 function getDatabaseUrl(): string {
-  return process.env.DATABASE_URL || `mysql://root@localhost:3306/${DB_NAME}`;
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    console.error('DATABASE_URL is not set');
+    process.exit(1);
+  }
+  return url;
 }
 
-async function runMigrationFile(pool: mysql.Connection, filePath: string): Promise<void> {
+/** Postgres errors that mean "this migration step was already applied". */
+const ALREADY_APPLIED = new Set([
+  '42P07', // duplicate_table
+  '42701', // duplicate_column
+  '42710', // duplicate_object (constraint/index)
+  '42P16', // invalid_table_definition
+  '42704', // undefined_object (DROP CONSTRAINT of a missing constraint)
+]);
+
+/**
+ * Split on semicolons that terminate a statement, ignoring those inside string
+ * literals or $$-quoted bodies (plpgsql functions contain their own semicolons).
+ */
+function splitStatements(sql: string): string[] {
+  const stripped = sql.replace(/--.*$/gm, '');
+  const statements: string[] = [];
+  let current = '';
+  let inSingle = false;
+  let dollarTag: string | null = null;
+
+  for (let i = 0; i < stripped.length; i++) {
+    const rest = stripped.slice(i);
+
+    if (!inSingle) {
+      const tagMatch = /^\$([A-Za-z_]*)\$/.exec(rest);
+      if (tagMatch) {
+        const tag = tagMatch[0];
+        if (dollarTag === null) dollarTag = tag;
+        else if (dollarTag === tag) dollarTag = null;
+        current += tag;
+        i += tag.length - 1;
+        continue;
+      }
+    }
+
+    const ch = stripped[i];
+    if (ch === "'" && dollarTag === null) inSingle = !inSingle;
+
+    if (ch === ';' && !inSingle && dollarTag === null) {
+      statements.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  statements.push(current);
+
+  return statements.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+async function runMigrationFile(client: pg.Client, filePath: string): Promise<void> {
   const sql = fs.readFileSync(filePath, 'utf8');
-  const statements = sql
-    .split(';')
-    .map((s) => s.replace(/--.*$/gm, '').trim())
-    .filter((s) => s.length > 0);
+  const statements = splitStatements(sql);
 
   const fileName = path.basename(filePath);
   console.log(`\n--- ${fileName} (${statements.length} statements) ---`);
@@ -31,15 +77,11 @@ async function runMigrationFile(pool: mysql.Connection, filePath: string): Promi
   for (const statement of statements) {
     const preview = statement.replace(/\s+/g, ' ').slice(0, 70);
     try {
-      await pool.query(statement);
+      await client.query(statement);
       console.log(`✓ ${preview}...`);
     } catch (err: unknown) {
       const code = (err as { code?: string }).code;
-      if (
-        code === 'ER_TABLE_EXISTS_ERROR' ||
-        code === 'ER_DUP_KEYNAME' ||
-        code === 'ER_DUP_FIELDNAME'
-      ) {
+      if (code && ALREADY_APPLIED.has(code)) {
         console.log(`○ Already exists: ${preview}...`);
         continue;
       }
@@ -50,15 +92,14 @@ async function runMigrationFile(pool: mysql.Connection, filePath: string): Promi
 }
 
 async function migrate(): Promise<void> {
-  const baseUrl = getBaseUrl();
   const dbUrl = getDatabaseUrl();
 
-  console.log('Creating database if needed...');
-  const admin = await mysql.createConnection(baseUrl);
-  await admin.query(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\``);
-  await admin.end();
+  const client = new pg.Client({
+    connectionString: dbUrl,
+    ssl: { rejectUnauthorized: false },
+  });
+  await client.connect();
 
-  const pool = await mysql.createConnection(dbUrl);
   const migrationsDir = path.join(__dirname, 'migrations');
   const migrationFiles = fs
     .readdirSync(migrationsDir)
@@ -66,15 +107,17 @@ async function migrate(): Promise<void> {
     .sort();
 
   for (const file of migrationFiles) {
-    await runMigrationFile(pool, path.join(migrationsDir, file));
+    await runMigrationFile(client, path.join(migrationsDir, file));
   }
 
-  const [tables] = await pool.query('SHOW TABLES');
-  await pool.end();
+  const tables = await client.query(
+    `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`
+  );
+  await client.end();
 
-  console.log(`\nDone. Tables in ${DB_NAME}:`);
-  for (const row of tables as Record<string, string>[]) {
-    console.log(`  - ${Object.values(row)[0]}`);
+  console.log('\nDone. Tables:');
+  for (const row of tables.rows as { tablename: string }[]) {
+    console.log(`  - ${row.tablename}`);
   }
 }
 

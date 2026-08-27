@@ -47,8 +47,30 @@ export class OAuthService {
     return crypto.createHash('sha256').update(verifier).digest('base64url');
   }
 
+  /**
+   * Meta app secrets are exactly 32 hex characters. A truncated paste otherwise
+   * passes the presence check and only fails at Meta with an opaque
+   * "Invalid appsecret" — catch it here instead.
+   */
+  static getConfigWarnings(platform: Platform): string[] {
+    const warnings: string[] = [];
+    if (platform === 'facebook' || platform === 'instagram') {
+      const key = platform === 'facebook' ? 'FACEBOOK_APP_SECRET' : 'INSTAGRAM_APP_SECRET';
+      const secret = process.env[key] || '';
+      if (secret && !/^[0-9a-f]{32}$/i.test(secret)) {
+        warnings.push(
+          `${key} should be 32 hex characters (got ${secret.length}) — re-copy it from the Meta dashboard`
+        );
+      }
+    }
+    return warnings;
+  }
+
   static isPlatformConfigured(platform: Platform): boolean {
-    return PLATFORM_ENV[platform].every((key) => !!process.env[key]);
+    return (
+      PLATFORM_ENV[platform].every((key) => !!process.env[key]) &&
+      this.getConfigWarnings(platform).length === 0
+    );
   }
 
   static getPlatformStatus(platform: Platform): { configured: boolean; mode: OAuthMode } {
@@ -76,6 +98,10 @@ export class OAuthService {
   ): Promise<{ redirectUrl: string; platform: Platform; mode: 'live' }> {
     const status = this.getPlatformStatus(platform);
     if (status.mode !== 'live') {
+      const warnings = this.getConfigWarnings(platform);
+      if (warnings.length > 0) {
+        throw new Error(`Live OAuth is not configured for ${platform}. ${warnings.join('; ')}`);
+      }
       const missing = this.getMissingEnvKeys(platform);
       throw new Error(
         `Live OAuth is not configured for ${platform}. Add ${missing.join(' and ')} to .env`
@@ -135,11 +161,18 @@ export class OAuthService {
       userId,
       platform,
     ]);
+    // Facebook keeps the long-lived user token in metadata; encrypt it like the
+    // primary token rather than storing a live credential in plaintext JSON.
+    const metadata = { ...(tokens.metadata || {}) } as Record<string, unknown>;
+    if (typeof metadata.userToken === 'string') {
+      metadata.userToken = encrypt(metadata.userToken);
+    }
+
     await pool.query(
       `INSERT INTO social_accounts
          (user_id, platform, account_handle, platform_user_id, avatar_url, scopes,
-          access_token, refresh_token, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          access_token, refresh_token, expires_at, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         userId,
         platform,
@@ -150,6 +183,7 @@ export class OAuthService {
         encrypt(tokens.accessToken),
         encrypt(tokens.refreshToken || ''),
         tokens.expiresAt,
+        JSON.stringify(metadata),
       ]
     );
   }
@@ -184,7 +218,7 @@ export class OAuthService {
               expires_at,
               CASE
                 WHEN expires_at IS NULL THEN 'active'
-                WHEN expires_at > DATE_ADD(NOW(), INTERVAL 48 HOUR) THEN 'active'
+                WHEN expires_at > NOW() + INTERVAL '48 hours' THEN 'active'
                 WHEN expires_at > NOW() THEN 'expiring'
                 ELSE 'expired'
               END AS token_status

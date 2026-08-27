@@ -92,23 +92,28 @@ ${recentBlock}
 ## Connected accounts
 ${
   accounts.length
-    ? accounts
-        .map((a: { platform: string; account_handle: string; followers_count: number }) =>
-          `- ${a.platform} (@${a.account_handle}, ${a.followers_count} followers)`
-        )
+    ? (accounts as { platform: string; account_handle: string; followers_count: number }[])
+        .map((a) => `- ${a.platform} (@${a.account_handle}, ${a.followers_count} followers)`)
         .join('\n')
     : '- No connected accounts'
 }
 
-## Platform character limits (hard maximum — never exceed)
+## Post length (most important rule)
 ${formatPlatformConstraints(platforms)}
+
+Treat that range as a requirement, not a suggestion: a variant shorter than the
+minimum is as wrong as one over the maximum. Aim for the middle of the range.
+Reach the minimum with real substance — a concrete detail, example, or reason —
+never with filler or restated ideas. The strictest range among
+${platforms.join(', ')} governs every variant.
 
 ## Output rules
 - Produce exactly 3 distinct variants labeled A, B, C.
-- Variant A: formal, professional, uses available character budget.
-- Variant B: casual, conversational, includes ${preferences.optimal_hashtag_count ?? 5} relevant hashtags.
+- Every variant must fall inside the target range — this applies to A, B, and C equally.
+- Variant A: formal, professional.
+- Variant B: casual, conversational, includes ${preferences.optimal_hashtag_count ?? 5} relevant hashtags (hashtags count toward the length).
 - Variant C: punchy hook-first, optimized for engagement.
-- Respect the strictest platform limit among: ${platforms.join(', ')}.
+- Output only the post text — no preamble, no labels, no commentary, no explanation of your choices.
 - Use this exact delimiter format:
 
 ---VARIANT_A---

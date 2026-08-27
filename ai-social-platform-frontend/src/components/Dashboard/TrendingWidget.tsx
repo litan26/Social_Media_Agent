@@ -28,7 +28,7 @@ export function TrendingWidget() {
       .then((res) => {
         setTrends(res.trends);
         setSource(res.source);
-        setScanned(res.total_tweets_scanned || 0);
+        setScanned(res.total_tweets_scanned || res.total_videos_scanned || 0);
         setFetchedAt(res.fetched_at || '');
         if (res.source === 'error') setError(res.error || 'Failed to load trends');
       })
@@ -54,17 +54,20 @@ export function TrendingWidget() {
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h2 className="font-display text-lg font-semibold text-white">Trending Topics</h2>
-          {source === 'twitter' && scanned > 0 && (
+          {(source === 'twitter' || source === 'youtube') && scanned > 0 && (
             <p className="mt-0.5 text-xs text-slate-500">
-              From {scanned} recent tweets · refreshed {timeAgo}
+              From {scanned} recent {source === 'youtube' ? 'videos' : 'tweets'} · refreshed {timeAgo}
             </p>
           )}
         </div>
         {source === 'twitter' && (
           <span className="badge border-sky-500/30 bg-sky-500/10 text-sky-300">Live · Twitter</span>
         )}
+        {source === 'youtube' && (
+          <span className="badge border-red-500/30 bg-red-500/10 text-red-300">Live · YouTube</span>
+        )}
         {source === 'claude' && (
-          <span className="badge border-violet-500/30 bg-violet-500/10 text-violet-300">AI · Claude</span>
+          <span className="badge border-violet-500/30 bg-violet-500/10 text-violet-300">AI · generated</span>
         )}
       </div>
 
@@ -78,7 +81,7 @@ export function TrendingWidget() {
         ) : error || source === 'unavailable' ? (
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-300">
             {source === 'unavailable'
-              ? 'Add TWITTER_BEARER_TOKEN to .env to enable live trending topics.'
+              ? 'Add GROQ_API_KEY (or a TWITTER_BEARER_TOKEN with available quota) to .env to enable trending topics.'
               : error}
           </div>
         ) : trends.length === 0 ? (
