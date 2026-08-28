@@ -1,10 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware, AuthRequest } from '../middleware/auth.middleware.js';
-import {
-  CreativeImageService,
-  GeminiQuotaError,
-  MissingGeminiApiKeyError,
-} from '../services/creativeImage.service.js';
+import { CreativeImageService } from '../services/creativeImage.service.js';
 import { CreativeHistoryService } from '../services/creativeHistory.service.js';
 import { getImageStorage } from '../services/imageStorage.service.js';
 import { pool } from '../db/connection.js';
@@ -12,11 +8,12 @@ import { pool } from '../db/connection.js';
 const router = Router();
 
 router.post('/generate', authMiddleware, async (req: AuthRequest, res) => {
-  const { text, tone } = req.body as { text?: string; tone?: string };
+  const { text, prompt, tone } = req.body as { text?: string; prompt?: string; tone?: string };
   const userId = req.userId!;
 
-  if (!text?.trim()) {
-    res.status(400).json({ error: 'text is required' });
+  const inputPrompt = (prompt || text)?.trim();
+  if (!inputPrompt) {
+    res.status(400).json({ error: 'Please provide a valid image prompt.' });
     return;
   }
 
@@ -24,12 +21,12 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res) => {
     const userResult = await pool.query('SELECT logo_url FROM users WHERE id = $1', [userId]);
     const logoUrl = userResult.rows[0]?.logo_url || undefined;
 
-    const result = await CreativeImageService.generateQuoteImage(text, { tone, logoUrl });
+    const result = await CreativeImageService.generateQuoteImage(inputPrompt, { tone, logoUrl });
 
     const stored = await getImageStorage().save(userId, result.png, 'png');
     const record = await CreativeHistoryService.record(userId, {
       quote: result.quote,
-      prompt: text.trim(),
+      prompt: inputPrompt,
       tone: result.tone,
       driver: stored.driver,
       key: stored.key,
@@ -43,18 +40,14 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res) => {
       id: record.id,
       url: record.url,
       quote: record.quote,
+      prompt: record.prompt || record.quote,
       tone: record.tone,
       createdAt: record.created_at,
-      // Retained so existing clients that render the inline preview keep working.
       dataUrl: `data:image/png;base64,${result.png.toString('base64')}`,
     });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Failed to generate creative image';
-    const status =
-      error instanceof MissingGeminiApiKeyError || error instanceof GeminiQuotaError
-        ? error.statusCode
-        : 500;
-    res.status(status).json({ error: message });
+    const message = error instanceof Error ? error.message : 'Failed to generate image';
+    res.status(500).json({ error: message });
   }
 });
 
@@ -77,6 +70,7 @@ router.get('/history', authMiddleware, async (req: AuthRequest, res) => {
         id: image.id,
         url: image.url,
         quote: image.quote,
+        prompt: image.prompt || image.quote,
         tone: image.tone,
         width: image.width,
         height: image.height,

@@ -16,6 +16,8 @@
     "@aws-sdk/client-s3": "^3.1064.0",
     "@aws-sdk/s3-request-presigner": "^3.1064.0",
     "@sentry/node": "^10.57.0",
+    "@types/multer": "^2.2.0",
+    "@types/pdf-parse": "^1.1.5",
     "@types/pg": "^8.20.4",
     "axios": "^1.7.9",
     "bcryptjs": "^2.4.3",
@@ -25,11 +27,16 @@
     "express-validator": "^7.2.1",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
+    "mammoth": "^1.12.1",
+    "multer": "^2.2.0",
     "node-cron": "^3.0.3",
     "openai": "^7.4.0",
+    "pdf-parse": "^2.4.5",
     "pg": "^8.22.0",
+    "pptxgenjs": "^4.0.1",
     "sharp": "^0.35.1",
-    "stripe": "^15.4.0"
+    "stripe": "^15.4.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

@@ -1,4 +1,5 @@
 import { SOCIAL_PLATFORMS } from '../../constants/platforms';
+import { BACKEND_URL } from '../../config/api';
 
 const ENV_KEYS: Record<string, string[]> = {
   twitter: ['TWITTER_CLIENT_ID', 'TWITTER_CLIENT_SECRET'],
@@ -46,7 +47,7 @@ export function OAuthSetupBanner({ platformStatus }: OAuthSetupBannerProps) {
               Set <code>{ENV_KEYS[platform.id]?.join(', ')}</code> in <code>.env</code>.
             </p>
             <p className="mt-1 text-amber-200/70 break-all">
-              Callback: <code>http://localhost:3000/oauth/callback/{platform.id}</code>
+              Callback: <code>{BACKEND_URL}/oauth/callback/{platform.id}</code>
             </p>
           </div>
         ))}

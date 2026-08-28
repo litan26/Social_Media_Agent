@@ -94,9 +94,12 @@ async function runMigrationFile(client: pg.Client, filePath: string): Promise<vo
 async function migrate(): Promise<void> {
   const dbUrl = getDatabaseUrl();
 
+  const needsSsl =
+    /[?&]sslmode=require/.test(dbUrl || '') || process.env.PGSSL === 'true';
+
   const client = new pg.Client({
     connectionString: dbUrl,
-    ssl: { rejectUnauthorized: false },
+    ...(needsSsl ? { ssl: { rejectUnauthorized: false } } : {}),
   });
   await client.connect();
 

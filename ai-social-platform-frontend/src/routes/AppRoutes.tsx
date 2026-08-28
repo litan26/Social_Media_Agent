@@ -20,6 +20,12 @@ import { AdminUsersPage } from '../pages/admin/AdminUsersPage';
 import { PlanPage } from '../pages/onboarding/PlanPage';
 import { ProfilePage } from '../pages/onboarding/ProfilePage';
 import { ConnectPage } from '../pages/onboarding/ConnectPage';
+import { ImageLibraryPage } from '../pages/app/ImageLibraryPage';
+import { PPTMakerPage } from '../pages/ppt-maker/PPTMakerPage';
+import { PPTCreatePage } from '../pages/ppt-maker/PPTCreatePage';
+import { PPTEditorPage } from '../pages/ppt-maker/PPTEditorPage';
+import { PPTTemplatesPage } from '../pages/ppt-maker/PPTTemplatesPage';
+import { PPTHistoryPage } from '../pages/ppt-maker/PPTHistoryPage';
 
 export function AppRoutes() {
   return (
@@ -68,7 +74,13 @@ export function AppRoutes() {
         }
       >
         <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/ppt-maker" element={<PPTMakerPage />} />
+        <Route path="/ppt-maker/create" element={<PPTCreatePage />} />
+        <Route path="/ppt-maker/editor/:id" element={<PPTEditorPage />} />
+        <Route path="/ppt-maker/templates" element={<PPTTemplatesPage />} />
+        <Route path="/ppt-maker/history" element={<PPTHistoryPage />} />
         <Route path="/posts/new" element={<NewPostPage />} />
+        <Route path="/media/library" element={<ImageLibraryPage />} />
         <Route path="/posts/calendar" element={<CalendarPage />} />
         <Route path="/posts/scheduled" element={<ScheduledPostsPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />

@@ -103,7 +103,7 @@ export function ConnectAccountsPanel({ showHeader = true }: ConnectAccountsPanel
       setError('Live OAuth is not available for this platform.');
     } catch (err) {
       if (!axios.isAxiosError(err) || !err.response) {
-        setError('Cannot reach the server. Is the backend running on port 3000?');
+        setError('Cannot reach the server. Is the backend running?');
       } else if (err.response.status === 401) {
         toast('Please sign in again', 'error');
       } else {
@@ -135,7 +135,7 @@ export function ConnectAccountsPanel({ showHeader = true }: ConnectAccountsPanel
       } catch (err) {
         if (targetWindow) targetWindow.close();
         if (!axios.isAxiosError(err) || !err.response) {
-          setError('Cannot reach the server. Is the backend running on port 3000?');
+          setError('Cannot reach the server. Is the backend running?');
         } else if (err.response.status === 401) {
           toast('Please sign in again', 'error');
         } else {

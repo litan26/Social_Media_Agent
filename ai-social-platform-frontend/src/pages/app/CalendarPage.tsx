@@ -22,7 +22,7 @@ export function CalendarPage() {
       setPosts(Array.isArray(data) ? data : []);
     } catch (err) {
       if (!axios.isAxiosError(err) || !err.response) {
-        toast('Cannot reach the server. Is the backend running on port 3000?', 'error');
+        toast('Cannot reach the server. Is the backend server running?', 'error');
       } else if (err.response.status === 401) {
         toast('Please sign in again', 'error');
       } else {

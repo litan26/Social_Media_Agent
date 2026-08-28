@@ -1,9 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { PostVariants } from '../types/post';
-
-const API_URL = import.meta.env.DEV
-  ? ''
-  : (import.meta.env.VITE_API_URL || 'http://localhost:3000');
+import { API_BASE_URL } from '../config/api';
 
 export interface StreamState {
   streaming: boolean;
@@ -62,7 +59,7 @@ export function useGenerateStream() {
       let partialVariants: PostVariants = { variantA: '', variantB: '', variantC: '' };
 
       try {
-        const response = await fetch(`${API_URL}/api/generate`, {
+        const response = await fetch(`${API_BASE_URL}/api/generate`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

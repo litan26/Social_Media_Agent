@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { PlatformSelector } from '../Social/PlatformSelector';
 import { usePosts } from '../../hooks/usePosts';
 import { useGenerateStream } from '../../hooks/useGenerateStream';
@@ -7,7 +7,7 @@ import { useToastStore } from '../../store/toastStore';
 import { useAuthStore } from '../../store/authStore';
 import { attachMediaUrl, uploadBrandLogo, uploadPostMedia } from '../../services/mediaApi';
 import { fetchTrends } from '../../services/trendsApi';
-import { generateCreativeImage } from '../../services/creativeApi';
+import { generateCreativeImage, fetchImageHistory, type CreativeImageResult } from '../../services/creativeApi';
 import { ensureNotifyPermission, notify } from '../../utils/browserNotify';
 
 const CHAR_LIMITS: Record<string, number> = {
@@ -95,10 +95,44 @@ export function PostForm({
   const [topicAutoFilled, setTopicAutoFilled] = useState(false);
   const [fetchingTrend, setFetchingTrend] = useState(false);
   const [viewingImage, setViewingImage] = useState<string | null>(null);
+  const [imagePrompt, setImagePrompt] = useState('');
+  const location = useLocation();
+
+  // Load user's persistent generated image library from database on mount
+  useEffect(() => {
+    fetchImageHistory()
+      .then((res) => {
+        setGeneratedImages(
+          res.images.map((img) => ({
+            id: img.id,
+            url: img.url,
+            dataUrl: img.dataUrl || img.url,
+            quote: img.prompt || img.quote,
+            createdAt: img.createdAt,
+            attached: false,
+          }))
+        );
+      })
+      .catch(() => {});
+  }, []);
+
+  // Handle passed image from Image Library route navigate state
+  useEffect(() => {
+    const attachImage = (location.state as { attachImage?: CreativeImageResult })?.attachImage;
+    if (attachImage) {
+      handleAttachGenerated({
+        id: attachImage.id,
+        url: attachImage.url,
+        dataUrl: attachImage.dataUrl || attachImage.url,
+        quote: attachImage.prompt || attachImage.quote,
+        createdAt: attachImage.createdAt,
+        attached: false,
+      });
+    }
+  }, [location.state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // When the parent passes a new suggestion (from the industry panel), load it
-  // into the AI panel *and* the main composer, so the click visibly changes the
-  // main panel rather than only a collapsed sidebar field.
+  // into the AI panel *and* the main composer
   useEffect(() => {
     if (!suggestion) return;
     setTopic(suggestion.topic);
@@ -107,8 +141,6 @@ export function PostForm({
     setAiVariants(null);
     setActiveVariant(null);
     setTopicAutoFilled(false);
-    // Only seed the composer when the user hasn't written anything yet —
-    // never clobber text they typed.
     setContent((prev) => (prev.trim() ? prev : suggestion.topic));
     aiPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [suggestion?.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -205,29 +237,26 @@ export function PostForm({
   };
 
   const handleGenerateImage = async () => {
-    const quoteText = content.trim() || topic.trim();
-    if (!quoteText) {
-      toast('Add content or a topic before generating an image', 'error');
+    const promptToUse = imagePrompt.trim() || content.trim() || topic.trim();
+    if (!promptToUse) {
+      toast('Please enter an image prompt or write post content first', 'error');
       return;
     }
 
-    // Ask up front, while the click is still a user gesture — browsers reject
-    // permission prompts that come back after an await chain.
     void ensureNotifyPermission();
-
     setGeneratingImage(true);
-    toast('Generating your image — keep working, we’ll notify you when it’s ready', 'success');
+    toast('Generating your image — please wait a few seconds', 'success');
 
     try {
-      const result = await generateCreativeImage(quoteText, tone);
+      const result = await generateCreativeImage(promptToUse, tone);
 
       setGeneratedImages((prev) => [
-        { ...result, attached: false },
+        { ...result, dataUrl: result.dataUrl || result.url, quote: result.prompt || result.quote, attached: false },
         ...prev,
       ]);
 
       notify('Your AI image is ready', {
-        body: result.quote ? `“${result.quote}”` : 'Tap to view it in your post composer.',
+        body: result.prompt || result.quote,
         image: result.url,
         icon: result.url,
         tag: `creative-image-${result.id}`,
@@ -244,7 +273,6 @@ export function PostForm({
           : undefined;
       const text = msg || (e instanceof Error ? e.message : 'Image generation failed');
       toast(text, 'error');
-      notify('Image generation failed', { body: text, tag: 'creative-image-error' });
     } finally {
       setGeneratingImage(false);
     }
@@ -385,7 +413,55 @@ export function PostForm({
           <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Media</p>
         </div>
 
-        {/* Dropzone-style upload area */}
+        {/* AI Image Generator Box */}
+        <div className="space-y-3 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.03] p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm">✦</span>
+              <p className="text-xs font-semibold uppercase tracking-wider text-cyan-300">
+                AI Image Generator
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate('/media/library')}
+              className="text-xs font-medium text-cyan-400 hover:text-cyan-300 underline"
+            >
+              Browse Image Library →
+            </button>
+          </div>
+
+          <textarea
+            value={imagePrompt}
+            onChange={(e) => setImagePrompt(e.target.value)}
+            placeholder="Enter an image prompt (e.g. A cinematic underwater city of the future with glowing glass skyscrapers beneath the ocean...)"
+            rows={2}
+            className="w-full resize-y rounded-xl border border-white/10 bg-black/40 px-3.5 py-2.5 text-sm text-slate-200 placeholder-slate-500 outline-none transition focus:border-cyan-500/40"
+          />
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-[11px] text-slate-500">
+              Generates a real 1080x1080 AI visual asset matching your prompt.
+            </span>
+            <button
+              type="button"
+              onClick={handleGenerateImage}
+              disabled={generatingImage || (!imagePrompt.trim() && !content.trim() && !topic.trim())}
+              className="btn-primary flex items-center gap-2 !bg-gradient-to-r !from-cyan-600 !to-blue-600 !py-2 !text-xs shadow-md shadow-cyan-500/20 disabled:opacity-40"
+            >
+              {generatingImage ? (
+                <>
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                  Generating image...
+                </>
+              ) : (
+                <>✦ Generate AI Image</>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Upload area */}
         <div className="grid gap-3 sm:grid-cols-2">
           <input
             ref={imageInputRef}
@@ -402,18 +478,9 @@ export function PostForm({
             type="button"
             onClick={() => imageInputRef.current?.click()}
             disabled={uploadingMedia}
-            className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-white/15 bg-white/[0.02] px-4 py-3.5 text-sm font-medium text-slate-400 transition-all hover:border-violet-500/40 hover:bg-violet-500/[0.06] hover:text-violet-300 disabled:opacity-40"
+            className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-white/15 bg-white/[0.02] px-4 py-3 text-sm font-medium text-slate-400 transition-all hover:border-violet-500/40 hover:bg-violet-500/[0.06] hover:text-violet-300 disabled:opacity-40"
           >
-            <span className="text-lg">🖼</span> Add Image
-          </button>
-
-          <button
-            type="button"
-            onClick={handleGenerateImage}
-            disabled={generatingImage || (!content.trim() && !topic.trim())}
-            className="flex items-center justify-center gap-2 rounded-xl border border-cyan-500/25 bg-cyan-500/[0.06] px-4 py-3.5 text-sm font-semibold text-cyan-200 transition-all hover:border-cyan-400/50 hover:bg-cyan-500/[0.12] disabled:opacity-40"
-          >
-            ✦ Generate AI Image
+            <span className="text-base">🖼</span> Upload Image File
           </button>
 
           <input
@@ -431,9 +498,9 @@ export function PostForm({
             type="button"
             onClick={() => videoInputRef.current?.click()}
             disabled={uploadingMedia}
-            className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-white/15 bg-white/[0.02] px-4 py-3.5 text-sm font-medium text-slate-400 transition-all hover:border-violet-500/40 hover:bg-violet-500/[0.06] hover:text-violet-300 disabled:opacity-40"
+            className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-white/15 bg-white/[0.02] px-4 py-3 text-sm font-medium text-slate-400 transition-all hover:border-violet-500/40 hover:bg-violet-500/[0.06] hover:text-violet-300 disabled:opacity-40"
           >
-            <span className="text-lg">🎬</span> Add Video
+            <span className="text-base">🎬</span> Upload Video File
           </button>
         </div>
 

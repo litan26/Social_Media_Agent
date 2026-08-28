@@ -21,7 +21,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
       onSuccess?.(useAuthStore.getState().user);
     } catch (err) {
       if (!axios.isAxiosError(err) || !err.response) {
-        setError('Cannot reach the server. Make sure the backend is running on port 3000.');
+        setError('Cannot reach the server. Make sure the backend server is running.');
       } else {
         setError('Invalid credentials');
       }

@@ -17,6 +17,7 @@ import suggestionsRoutes from './routes/suggestions.routes.js';
 import creativeRoutes from './routes/creative.routes.js';
 import paymentRoutes from './routes/payment.routes.js';
 import paymentWebhookRoutes from './routes/payment.webhook.routes.js';
+import pptRoutes from './routes/ppt.routes.js';
 import { errorMiddleware } from './middleware/error.middleware.js';
 import {
   LOCAL_PUBLIC_PREFIX,
@@ -82,6 +83,7 @@ app.use('/api/trends', trendsRoutes);
 app.use('/api/suggestions', suggestionsRoutes);
 app.use('/api/creative', creativeRoutes);
 app.use('/api/payment', paymentRoutes);
+app.use('/api/ppt', pptRoutes);
 
 app.use(errorMiddleware);
 

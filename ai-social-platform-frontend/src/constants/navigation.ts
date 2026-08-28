@@ -9,6 +9,8 @@ import {
   IconGlobe,
   IconSparkle,
   IconBolt,
+  IconPhoto,
+  IconPresentation,
 } from '../components/ui/Icons';
 
 type IconProps = { className?: string };
@@ -44,9 +46,16 @@ export const appNavGroups: NavGroup[] = [
     ],
   },
   {
+    label: 'Presentation Studio',
+    links: [
+      { to: '/ppt-maker', label: 'AI PPT Maker', icon: IconPresentation },
+    ],
+  },
+  {
     label: 'Content',
     links: [
       { to: '/posts/new', label: 'New post', icon: IconPen },
+      { to: '/media/library', label: 'Image Library', icon: IconPhoto },
       { to: '/posts/calendar', label: 'Calendar', icon: IconCalendar },
       { to: '/posts/scheduled', label: 'Scheduled list', icon: IconCalendar },
     ],

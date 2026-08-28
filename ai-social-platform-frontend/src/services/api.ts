@@ -1,12 +1,8 @@
 import axios from 'axios';
-
-// In dev, use Vite proxy (/api → localhost:3000) so any frontend port works
-const API_URL = import.meta.env.DEV
-  ? ''
-  : (import.meta.env.VITE_API_URL || 'http://localhost:3000');
+import { API_BASE_URL } from '../config/api';
 
 export const api = axios.create({
-  baseURL: API_URL,
+  baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
 });
 
