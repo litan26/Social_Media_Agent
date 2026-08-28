@@ -17,7 +17,8 @@ const upload = multer({
 
 function getPool(): pg.Pool {
   const connectionString = process.env.DATABASE_URL;
-  const needsSsl = /[?&]sslmode=require/.test(connectionString || '') || process.env.PGSSL === 'true';
+  const isLocalhost = connectionString?.includes('localhost') || connectionString?.includes('127.0.0.1');
+  const needsSsl = Boolean(connectionString) && (!isLocalhost || /[?&]sslmode=require/.test(connectionString || '') || process.env.PGSSL === 'true');
   return new pg.Pool({
     connectionString,
     ...(needsSsl ? { ssl: { rejectUnauthorized: false } } : {}),

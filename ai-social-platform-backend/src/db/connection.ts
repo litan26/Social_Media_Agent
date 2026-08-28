@@ -16,8 +16,8 @@ pg.types.setTypeParser(20, (v) => parseInt(v, 10)); // int8
 pg.types.setTypeParser(1700, (v) => parseFloat(v)); // numeric
 
 const connectionString = process.env.DATABASE_URL;
-const needsSsl = /[?&]sslmode=require/.test(connectionString || '') ||
-  process.env.PGSSL === 'true';
+const isLocalhost = connectionString?.includes('localhost') || connectionString?.includes('127.0.0.1');
+const needsSsl = Boolean(connectionString) && (!isLocalhost || /[?&]sslmode=require/.test(connectionString || '') || process.env.PGSSL === 'true');
 
 const pgPool = new pg.Pool({
   connectionString,
