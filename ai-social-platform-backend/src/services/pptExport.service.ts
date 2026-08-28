@@ -1,5 +1,3 @@
-import pptxgen from 'pptxgenjs';
-const PptxGenJS: any = (pptxgen as any).default || pptxgen;
 import { ColorTheme, SlideItem } from './pptGemini.service.js';
 
 export class PptExportService {
@@ -11,6 +9,8 @@ export class PptExportService {
       ratio?: string;
     } = {}
   ): Promise<Buffer> {
+    const pptxModule = await import('pptxgenjs');
+    const PptxGenJS: any = (pptxModule as any).default || pptxModule;
     const pptx = new PptxGenJS();
     
     // Set presentation layout ratio
