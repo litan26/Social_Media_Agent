@@ -1,7 +1,4 @@
 import axios from 'axios';
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
 import mammoth from 'mammoth';
 import * as xlsx from 'xlsx';
 import { CreativeImageService } from './creativeImage.service.js';
@@ -211,8 +208,18 @@ export class PptGeminiService {
     const ext = file.originalname.split('.').pop()?.toLowerCase() || '';
 
     if (ext === 'pdf' || file.mimetype === 'application/pdf') {
-      const parsed = await pdfParse(file.buffer);
-      return { text: parsed.text || '' };
+      try {
+        if (typeof (globalThis as any).DOMMatrix === 'undefined') {
+          (globalThis as any).DOMMatrix = class DOMMatrix {};
+        }
+        const pdfParseModule = await import('pdf-parse');
+        const pdfParse = (pdfParseModule as any).default || pdfParseModule;
+        const parsed = await pdfParse(file.buffer);
+        return { text: parsed.text || '' };
+      } catch (err) {
+        console.warn('PDF parsing fallback:', err);
+        return { text: file.buffer.toString('utf8') };
+      }
     }
 
     if (ext === 'docx' || ext === 'doc' || file.mimetype.includes('wordprocessingml')) {
