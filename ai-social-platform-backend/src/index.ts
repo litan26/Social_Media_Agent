@@ -33,7 +33,13 @@ initSentry();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: false,
+    crossOriginOpenerPolicy: false,
+  })
+);
 app.use(
   cors({
     origin: (origin, callback) => {
