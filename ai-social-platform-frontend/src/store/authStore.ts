@@ -37,8 +37,21 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     try {
       const { data } = await api.post<AuthResponse>('/api/auth/login', { email, password });
       localStorage.setItem('token', data.token);
-      set({ token: data.token, isLoading: false });
-      await get().fetchMe();
+      set({
+        token: data.token,
+        user: {
+          id: data.userId,
+          email: data.email,
+          role: data.role as any,
+          plan: (data.plan || 'free') as any,
+        },
+        isLoading: false,
+      });
+      try {
+        await get().fetchMe();
+      } catch (meError) {
+        console.warn('fetchMe after login fallback:', meError);
+      }
     } catch (error) {
       set({ isLoading: false });
       throw error;

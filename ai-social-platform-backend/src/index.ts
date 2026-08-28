@@ -42,20 +42,15 @@ app.use(
 );
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      if (
-        /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
-        /\.vercel\.app$/.test(origin) ||
-        (process.env.FRONTEND_URL && origin.startsWith(process.env.FRONTEND_URL.replace(/\/$/, '')))
-      ) {
-        return callback(null, true);
-      }
-      return callback(null, true);
-    },
+    origin: true,
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
   })
 );
+app.options('*', (req, res) => {
+  res.sendStatus(204);
+});
 app.use('/api/webhooks', express.raw({ type: 'application/json' }), webhookRoutes);
 app.use('/api/payment/webhook', express.raw({ type: 'application/json' }), paymentWebhookRoutes);
 app.use(express.json());
