@@ -36,19 +36,17 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(
   cors({
-    origin:
-      process.env.NODE_ENV === 'production'
-        ? process.env.FRONTEND_URL || 'http://localhost:5173'
-        : (origin, callback) => {
-            if (
-              !origin ||
-              /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
-            ) {
-              callback(null, true);
-            } else {
-              callback(null, process.env.FRONTEND_URL || 'http://localhost:5173');
-            }
-          },
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (
+        /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+        /\.vercel\.app$/.test(origin) ||
+        (process.env.FRONTEND_URL && origin.startsWith(process.env.FRONTEND_URL.replace(/\/$/, '')))
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
     credentials: true,
   })
 );

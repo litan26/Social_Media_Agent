@@ -20,10 +20,14 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
       await login(email, password);
       onSuccess?.(useAuthStore.getState().user);
     } catch (err) {
-      if (!axios.isAxiosError(err) || !err.response) {
-        setError('Cannot reach the server. Make sure the backend server is running.');
+      if (axios.isAxiosError(err) && err.response?.data?.error) {
+        setError(err.response.data.error);
+      } else if (axios.isAxiosError(err) && err.response?.status === 401) {
+        setError('Invalid email or password');
+      } else if (axios.isAxiosError(err) && err.response) {
+        setError(`Server error (${err.response.status}). Please try again.`);
       } else {
-        setError('Invalid credentials');
+        setError('Connection error. Please check your internet connection and try again.');
       }
     }
   };
