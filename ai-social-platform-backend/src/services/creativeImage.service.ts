@@ -1,4 +1,3 @@
-import sharp from 'sharp';
 import axios from 'axios';
 import OpenAI from 'openai';
 
@@ -116,10 +115,17 @@ export class CreativeImageService {
     const toneKey = options.tone || 'professional';
     const rawImageBuffer = await generateAIImageBuffer(prompt, toneKey);
 
-    const png = await sharp(rawImageBuffer)
-      .resize(SIZE, SIZE, { fit: 'cover' })
-      .png()
-      .toBuffer();
+    let png = rawImageBuffer;
+    try {
+      const sharpModule = await import('sharp');
+      const sharpInstance = (sharpModule as any).default || sharpModule;
+      png = await sharpInstance(rawImageBuffer)
+        .resize(SIZE, SIZE, { fit: 'cover' })
+        .png()
+        .toBuffer();
+    } catch (err) {
+      console.warn('Sharp module unavailable, using raw image buffer:', err);
+    }
 
     return { png, quote: prompt, tone: toneKey, width: SIZE, height: SIZE };
   }
