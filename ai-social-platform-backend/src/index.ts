@@ -87,8 +87,10 @@ app.use('/api/ppt', pptRoutes);
 
 app.use(errorMiddleware);
 
-app.listen(PORT, () => {
-  console.log(`AI Social Platform API running on http://localhost:${PORT}`);
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`AI Social Platform API running on http://localhost:${PORT}`);
+  });
+}
 
 export default app;

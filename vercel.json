@@ -1,11 +1,30 @@
 {
-  "installCommand": "npm --prefix ai-social-platform-frontend install",
-  "buildCommand": "cd ai-social-platform-frontend && npm run build",
-  "outputDirectory": "ai-social-platform-frontend/dist",
-  "rewrites": [
+  "version": 2,
+  "builds": [
     {
-      "source": "/(.*)",
-      "destination": "/index.html"
+      "src": "ai-social-platform-backend/src/index.ts",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "ai-social-platform-frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "ai-social-platform-backend/src/index.ts"
+    },
+    {
+      "src": "/health",
+      "dest": "ai-social-platform-backend/src/index.ts"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "ai-social-platform-frontend/$1"
     }
   ]
 }
