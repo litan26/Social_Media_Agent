@@ -1,0 +1,10 @@
+{
+  "buildCommand": "npm --prefix ai-social-platform-frontend run build",
+  "outputDirectory": "ai-social-platform-frontend/dist",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:backend": "npm --prefix ai-social-platform-backend run dev",
-    "dev:frontend": "npm --prefix ai-social-platform-frontend run dev"
+    "dev:frontend": "npm --prefix ai-social-platform-frontend run dev",
+    "build": "npm --prefix ai-social-platform-frontend run build"
   }
 }
